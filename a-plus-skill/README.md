@@ -23,13 +23,17 @@ OpenClaw 스킬 추천에 보안 심사를 기본 결합한 로컬 우선 MVP입
 
 ## 실행
 ```bash
-npm install
+npm ci --include=dev
 npm run dev
 ```
+
+> preflight가 devDependencies(typescript/vitest/tsx) 누락 시 즉시 실패시킵니다.
 
 ## 테스트
 ```bash
 npm run test
+npm run typecheck
+npm run build
 ```
 
 ## 산출 예시

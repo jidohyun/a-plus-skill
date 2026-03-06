@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: a-plus-skill
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+          cache: 'npm'
+          cache-dependency-path: a-plus-skill/package-lock.json
+      - run: npm ci --include=dev
+      - run: npm run test
+      - run: npm run typecheck
+      - run: npm run build
