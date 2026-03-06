@@ -1,13 +1,17 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createDiscordDmSender, DiscordDmError } from './discordDm.js';
-import type { CollectorMeta, ReportDeliveryResult } from '../types/index.js';
+import { createTelegramSender, TelegramSendError } from './telegram.js';
+import type { CollectorMeta, ReportDeliveryMode, ReportDeliveryResult } from '../types/index.js';
 
-const MAX_MESSAGE_LENGTH = 1900;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 300;
 const MAX_RETRY_AFTER_MS = 60_000;
 const DELIVERY_LOG_PATH = resolve(process.cwd(), 'data/report-delivery.log');
+const MAX_MESSAGE_LENGTH: Record<Exclude<ReportDeliveryMode, 'none'>, number> = {
+  'discord-dm': 1900,
+  telegram: 4000
+};
 
 type SenderFn = (content: string) => Promise<unknown>;
 type SleepFn = (ms: number) => Promise<void>;
@@ -22,7 +26,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
-export function splitReportMessage(input: string, maxLen = MAX_MESSAGE_LENGTH): string[] {
+export function splitReportMessage(input: string, maxLen: number): string[] {
   if (input.length <= maxLen) return [input];
 
   const chunks: string[] = [];
@@ -62,12 +66,29 @@ export function splitReportMessage(input: string, maxLen = MAX_MESSAGE_LENGTH): 
 }
 
 function sanitizeError(error: unknown): ErrorInfo {
-  if (error instanceof DiscordDmError) {
+  if (error instanceof DiscordDmError || error instanceof TelegramSendError) {
     return {
       code: error.code,
       status: error.status,
       retryAfterMs: error.retryAfterMs
     };
+  }
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
+    const status = 'status' in error && typeof (error as { status?: unknown }).status === 'number'
+      ? (error as { status?: number }).status
+      : undefined;
+    const retryAfterMs =
+      'retryAfterMs' in error && typeof (error as { retryAfterMs?: unknown }).retryAfterMs === 'number'
+        ? (error as { retryAfterMs?: number }).retryAfterMs
+        : undefined;
+
+    return { code: (error as { code: string }).code, status, retryAfterMs };
   }
 
   if (error instanceof Error) {
@@ -88,6 +109,7 @@ async function logFailure(message: string): Promise<void> {
 
 function isRetryable(info: ErrorInfo): boolean {
   if (info.code === 'MISSING_CONFIG') return false;
+  if (typeof info.status === 'number' && info.status >= 400 && info.status < 500 && info.status !== 429) return false;
   if (info.status === 429) return true;
   if (typeof info.status === 'number') return info.status >= 500;
   return true; // unknown/network-like errors
@@ -101,28 +123,43 @@ function computeBackoffMs(info: ErrorInfo, attempt: number): number {
   return BASE_BACKOFF_MS * 2 ** (attempt - 1);
 }
 
+function resolveMode(raw: string): ReportDeliveryMode | 'unsupported' {
+  if (raw === 'none') return 'none';
+  if (raw === 'discord-dm') return 'discord-dm';
+  if (raw === 'telegram') return 'telegram';
+  return 'unsupported';
+}
+
+function createSender(mode: Exclude<ReportDeliveryMode, 'none'>, deps?: { sender?: SenderFn }): SenderFn {
+  if (deps?.sender) return deps.sender;
+  if (mode === 'discord-dm') return createDiscordDmSender();
+  return createTelegramSender();
+}
+
 export async function sendWeeklyReport(
   report: string,
   meta?: CollectorMeta,
   deps?: { sender?: SenderFn; sleepFn?: SleepFn }
 ): Promise<ReportDeliveryResult> {
-  const mode = (process.env.REPORT_DELIVERY ?? 'none').trim().toLowerCase();
+  const rawMode = (process.env.REPORT_DELIVERY ?? 'none').trim().toLowerCase();
+  const mode = resolveMode(rawMode);
+
   if (mode === 'none') {
     return { skipped: true, mode: 'none', chunksAttempted: 0, chunksSent: 0 };
   }
 
-  if (mode !== 'discord-dm') {
-    const reason = `unsupported REPORT_DELIVERY mode`;
-    await logFailure(`event=unsupported_mode mode=${mode}`);
+  if (mode === 'unsupported') {
+    const reason = 'unsupported REPORT_DELIVERY mode';
+    await logFailure(`event=unsupported_mode mode=${rawMode}`);
     return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
   }
 
-  const sender = deps?.sender ?? createDiscordDmSender();
+  const sender = createSender(mode, deps);
   const sleepImpl = deps?.sleepFn ?? sleep;
   const payload = meta
     ? `${report}\n\n(meta: source=${meta.source}, degraded=${meta.degraded}, fetchedAt=${meta.fetchedAt})`
     : report;
-  const chunks = splitReportMessage(payload, MAX_MESSAGE_LENGTH);
+  const chunks = splitReportMessage(payload, MAX_MESSAGE_LENGTH[mode]);
 
   let chunksSent = 0;
 
@@ -139,7 +176,7 @@ export async function sendWeeklyReport(
       } catch (error) {
         const info = sanitizeError(error);
         await logFailure(
-          `event=delivery_failed chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${info.code}${
+          `event=delivery_failed mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${info.code}${
             info.status ? ` status=${info.status}` : ''
           }${info.retryAfterMs ? ` retry_after_ms=${info.retryAfterMs}` : ''}`
         );
@@ -157,7 +194,7 @@ export async function sendWeeklyReport(
     if (!sent) {
       return {
         skipped: false,
-        mode: 'discord-dm',
+        mode,
         success: false,
         chunksAttempted: chunks.length,
         chunksSent,
@@ -168,7 +205,7 @@ export async function sendWeeklyReport(
 
   return {
     skipped: false,
-    mode: 'discord-dm',
+    mode,
     success: true,
     chunksAttempted: chunks.length,
     chunksSent

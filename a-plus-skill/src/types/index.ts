@@ -71,7 +71,7 @@ export type CollectorResult = {
   meta: CollectorMeta;
 };
 
-export type ReportDeliveryMode = 'none' | 'discord-dm';
+export type ReportDeliveryMode = 'none' | 'discord-dm' | 'telegram';
 
 export type ReportDeliveryResult = {
   skipped: boolean;

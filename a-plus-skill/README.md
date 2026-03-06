@@ -20,7 +20,7 @@ OpenClaw 스킬 추천에 보안 심사를 기본 결합한 로컬 우선 MVP입
 - `src/security`: 보안 규칙/점수화
 - `src/policy`: 설치 정책 결정
 - `src/report`: 주간 리포트 생성
-- `src/delivery`: 리포트 전송(Discord DM)
+- `src/delivery`: 리포트 전송(Discord DM / Telegram)
 
 ## 실행
 ```bash
@@ -30,10 +30,14 @@ npm run dev
 
 > preflight가 devDependencies(typescript/vitest/tsx) 누락 시 즉시 실패시킵니다.
 
-## 리포트 전송 설정 (Discord DM)
-- `REPORT_DELIVERY`: `none | discord-dm` (기본 `none`)
-- `DISCORD_BOT_TOKEN`: Discord Bot 토큰 (`Bot <token>` 인증에 사용)
-- `DISCORD_DM_USER_ID`: DM 수신 대상 Discord user id
+## 리포트 전송 설정 (Discord DM / Telegram)
+- `REPORT_DELIVERY`: `none | discord-dm | telegram` (기본 `none`)
+- Discord DM
+  - `DISCORD_BOT_TOKEN`: Discord Bot 토큰 (`Bot <token>` 인증에 사용)
+  - `DISCORD_DM_USER_ID`: DM 수신 대상 Discord user id
+- Telegram
+  - `TELEGRAM_BOT_TOKEN`: Telegram Bot 토큰
+  - `TELEGRAM_CHAT_ID`: 수신 대상 chat id (개인/그룹/채널)
 
 `REPORT_DELIVERY=none`이면 전송을 스킵하고 기존 콘솔 출력만 수행합니다.
 
@@ -44,14 +48,21 @@ npm run report:send
 
 # Discord DM 전송 (.env 또는 안전한 secret 주입 권장)
 REPORT_DELIVERY=discord-dm npm run report:send
+
+# Telegram 전송 (.env 또는 안전한 secret 주입 권장)
+REPORT_DELIVERY=telegram npm run report:send
 ```
 
 > 보안 주의: 토큰을 커맨드라인 인라인으로 넣지 마세요. shell history/process list에 남을 수 있습니다.
+> Telegram은 Bot API 제한(429)을 반환할 수 있으며, 본 구현은 `retry_after`를 파싱해 chunk 전송 재시도 지연(ms)으로 매핑합니다.
 
 ## cron 예시
 ```cron
 # 매주 월요일 09:00 UTC (환경변수는 별도 envfile/systemd/secret store에서 주입)
 0 9 * * 1 cd /home/node/.openclaw/workspace/a-plus-skill && REPORT_DELIVERY=discord-dm npm run report:send
+
+# Telegram 전송 버전
+0 9 * * 1 cd /home/node/.openclaw/workspace/a-plus-skill && REPORT_DELIVERY=telegram npm run report:send
 ```
 
 ## 전송 실패 로그
