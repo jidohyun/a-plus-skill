@@ -3,9 +3,15 @@ export type Policy = 'strict' | 'balanced' | 'fast';
 export type SkillMeta = {
   slug: string;
   name: string;
+  author: string;
   downloads: number;
+  installsCurrent: number;
   stars: number;
+  versions: number;
+  summary: string;
   securityScanStatus: 'benign' | 'suspicious' | 'unknown';
+  securityConfidence: 'low' | 'medium' | 'high';
+  updatedAt: string;
 };
 
 export type RecommendationResult = {
