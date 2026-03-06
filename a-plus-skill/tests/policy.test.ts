@@ -6,19 +6,27 @@ describe('policy', () => {
     expect(decide('balanced', 90, 30)).toBe('block');
   });
 
-  it('forces effective hold on degraded mode', () => {
-    const plan = planInstallAction('balanced', 'recommend', { degraded: true });
+  it('forces effective hold on degraded mode and disallows any install', () => {
+    const plan = planInstallAction('balanced', 'recommend', {
+      degraded: true,
+      confirmed: true,
+      overrideToken: 'token',
+      strongOverrideToken: 'strong',
+      overrideReason: 'force'
+    });
     expect(plan.effectiveDecision).toBe('hold');
     expect(plan.canInstall).toBe(false);
+    expect(plan.action).toBe('skip-install');
   });
 
-  it('strict policy allows hold only with override token + confirmation', () => {
-    const denied = planInstallAction('strict', 'hold', { confirmed: true });
+  it('strict policy allows hold only with strong override token + reason + confirmation', () => {
+    const denied = planInstallAction('strict', 'hold', { confirmed: true, overrideToken: 'short' });
     expect(denied.canInstall).toBe(false);
 
     const allowed = planInstallAction('strict', 'hold', {
       confirmed: true,
-      overrideToken: 'token'
+      overrideToken: '12345678901234567890',
+      overrideReason: 'urgent-fix'
     });
     expect(allowed.canInstall).toBe(true);
     expect(allowed.action).toBe('override-install');
@@ -35,7 +43,7 @@ describe('policy', () => {
     expect(plan.action).toBe('skip-install');
   });
 
-  it('balanced policy overrides block only with strong override + reason + confirmation', () => {
+  it('balanced policy overrides block only with two strong tokens + reason + confirmation', () => {
     const denied = planInstallAction('balanced', 'block', {
       confirmed: true,
       overrideToken: 'token'
@@ -44,20 +52,27 @@ describe('policy', () => {
 
     const allowed = planInstallAction('balanced', 'block', {
       confirmed: true,
-      overrideToken: 'token',
-      strongOverrideToken: 'strong',
+      overrideToken: '12345678901234567890',
+      strongOverrideToken: 'ABCDEFGHIJABCDEFGHIJ',
       overrideReason: 'business critical'
     });
     expect(allowed.canInstall).toBe(true);
     expect(allowed.action).toBe('override-install');
   });
 
-  it('fast policy allows block on confirmation + override token', () => {
-    const plan = planInstallAction('fast', 'block', {
+  it('fast policy allows block only with strong token + reason + confirmation', () => {
+    const denied = planInstallAction('fast', 'block', {
       confirmed: true,
       overrideToken: 'token'
     });
-    expect(plan.canInstall).toBe(true);
-    expect(plan.action).toBe('override-install');
+    expect(denied.canInstall).toBe(false);
+
+    const allowed = planInstallAction('fast', 'block', {
+      confirmed: true,
+      overrideToken: '12345678901234567890',
+      overrideReason: 'operator approved'
+    });
+    expect(allowed.canInstall).toBe(true);
+    expect(allowed.action).toBe('override-install');
   });
 });

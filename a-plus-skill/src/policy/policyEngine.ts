@@ -15,6 +15,17 @@ function hasToken(v?: string): boolean {
   return Boolean(v && v.trim().length > 0);
 }
 
+function hasStrongToken(v?: string): boolean {
+  const token = v?.trim() ?? '';
+  // lightweight hardening: require sufficiently long mixed token
+  return token.length >= 20;
+}
+
+function hasReason(v?: string): boolean {
+  const reason = v?.trim() ?? '';
+  return reason.length >= 8;
+}
+
 export function planInstallAction(
   policy: Policy,
   decision: RecommendationResult['decision'],
@@ -24,7 +35,15 @@ export function planInstallAction(
   const effectiveDecision = context.degraded ? 'hold' : decision;
 
   if (context.degraded) {
-    notes.push('degraded mode: effectiveDecision forced to hold');
+    notes.push('degraded mode: install is hard-blocked regardless of policy/override');
+    return {
+      policy,
+      originalDecision: decision,
+      effectiveDecision,
+      action: 'skip-install',
+      canInstall: false,
+      notes
+    };
   }
 
   if (effectiveDecision === 'recommend' || effectiveDecision === 'caution') {
@@ -39,9 +58,9 @@ export function planInstallAction(
   }
 
   if (effectiveDecision === 'hold') {
-    const canOverride = hasToken(context.overrideToken);
+    const canOverride = hasStrongToken(context.overrideToken) && hasReason(context.overrideReason);
     if (canOverride && context.confirmed) {
-      notes.push('hold overridden with token + confirmation');
+      notes.push('hold overridden with strong token + reason + confirmation');
       return {
         policy,
         originalDecision: decision,
@@ -52,7 +71,11 @@ export function planInstallAction(
       };
     }
 
-    notes.push(policy === 'strict' ? 'strict policy: hold requires override token' : 'hold requires confirmation + override');
+    notes.push(
+      policy === 'strict'
+        ? 'strict policy: hold requires strong override token + reason + confirmation'
+        : 'hold requires strong override token + reason + confirmation'
+    );
     return {
       policy,
       originalDecision: decision,
@@ -77,9 +100,9 @@ export function planInstallAction(
   }
 
   if (policy === 'balanced') {
-    const hasStrongOverride = hasToken(context.overrideToken) && hasToken(context.strongOverrideToken);
-    if (hasStrongOverride && hasToken(context.overrideReason) && context.confirmed) {
-      notes.push('balanced policy: block overridden with strong override + reason + confirmation');
+    const hasStrongOverride = hasStrongToken(context.overrideToken) && hasStrongToken(context.strongOverrideToken);
+    if (hasStrongOverride && hasReason(context.overrideReason) && context.confirmed) {
+      notes.push('balanced policy: block overridden with strong override tokens + reason + confirmation');
       return {
         policy,
         originalDecision: decision,
@@ -90,7 +113,7 @@ export function planInstallAction(
       };
     }
 
-    notes.push('balanced policy: block needs override token + strong override token + reason + confirmation');
+    notes.push('balanced policy: block needs strong override token + strong override token + reason + confirmation');
     return {
       policy,
       originalDecision: decision,
@@ -102,8 +125,8 @@ export function planInstallAction(
   }
 
   // fast policy
-  if (hasToken(context.overrideToken) && context.confirmed) {
-    notes.push('fast policy: block overridden with confirmation + override token');
+  if (hasStrongToken(context.overrideToken) && hasReason(context.overrideReason) && context.confirmed) {
+    notes.push('fast policy: block overridden with strong token + reason + confirmation');
     return {
       policy,
       originalDecision: decision,
@@ -114,7 +137,7 @@ export function planInstallAction(
     };
   }
 
-  notes.push('fast policy: block needs confirmation + override token');
+  notes.push('fast policy: block needs strong override token + reason + confirmation');
   return {
     policy,
     originalDecision: decision,

@@ -46,17 +46,18 @@ npm run build
 - ClawHub 공개 페이지 구조가 바뀌면 파싱 정확도가 떨어질 수 있습니다.
 - 네트워크 실패/응답 오류/파싱 실패(또는 품질 임계치 미달) 시 mock 데이터로 fallback 합니다.
 - fallback 시 메타데이터(`source`, `degraded`, `fallbackReason`, `fetchedAt`)를 함께 반환해 조용한 실패를 방지합니다.
-- degraded 상태에서는 추천 결정을 보수적으로 `hold`로 강제합니다.
+- degraded 상태에서는 추천 결정을 보수적으로 `hold`로 강제하고, 설치는 정책/override와 무관하게 hard-block(`skip-install`)합니다.
 - 현재는 공개 페이지 기반 경량 파싱이라, 비공개 지표나 정밀한 랭킹 정보는 반영하지 않습니다.
 
 ## 설치 플로우 정책(신규)
 - decision(`recommend/caution/hold/block`)을 install action으로 변환합니다.
-- 수집 degraded(`meta.degraded=true`)이면 `effectiveDecision=hold`로 강제합니다.
+- 수집 degraded(`meta.degraded=true`)이면 `effectiveDecision=hold`로 강제하고 설치는 항상 `skip-install` 처리합니다(override 불가).
 - 정책별 우회 규칙:
-  - `strict`: hold는 `INSTALL_OVERRIDE_TOKEN` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
-  - `balanced`: hold는 override 가능, block은 `INSTALL_OVERRIDE_TOKEN` + `INSTALL_OVERRIDE_STRONG_TOKEN` + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요
-  - `fast`: hold/block 모두 `INSTALL_OVERRIDE_TOKEN` + `INSTALL_CONFIRM=true`로 허용
+  - `strict`: hold는 **강한** `INSTALL_OVERRIDE_TOKEN`(20자+) + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
+  - `balanced`: hold는 strong token+reason+confirm 필요, block은 strong token 2개(`INSTALL_OVERRIDE_TOKEN`, `INSTALL_OVERRIDE_STRONG_TOKEN`) + reason + confirm 필요
+  - `fast`: hold/block 모두 strong token(20자+) + reason + confirm 필요
 - 기본값은 안전 모드: 확인/우회가 없으면 hold/block 설치는 실행되지 않습니다.
+- degraded 상태에서는 정책과 무관하게 설치는 항상 `skip-install`입니다.
 
 ### 설치 관련 환경변수
 - `INSTALL_POLICY`: `strict | balanced | fast` (기본 `balanced`)
@@ -64,7 +65,8 @@ npm run build
 - `INSTALL_OVERRIDE_TOKEN`: hold/block 우회 토큰
 - `INSTALL_OVERRIDE_STRONG_TOKEN`: balanced block 우회용 추가 토큰
 - `INSTALL_OVERRIDE_REASON`: balanced block 우회 사유
-- `OPENCLAW_INSTALL_COMMAND`: 실제 설치 커맨드 베이스 (기본 `openclaw skill install`)
+- `OPENCLAW_INSTALL_COMMAND`: 설치 커맨드 베이스 (기본 `openclaw skill install`)
+  - 보안상 첫 토큰은 `openclaw`만 허용되며, 서브커맨드는 반드시 `skill install`로 시작해야 합니다.
 
 ## 산출 예시
 - top 추천 리스트 + 보안 상태(`recommend/caution/hold/block`)
