@@ -9,8 +9,8 @@ OpenClaw 스킬 추천에 보안 심사를 기본 결합한 로컬 우선 MVP입
 - [x] 보안 점수 계산 (스캔 신호 + 룰 기반 위험 패턴)
 - [x] 추천 사유 생성기
 - [x] 주간 리포트 문자열 렌더러
-- [x] 기본 테스트 파일 3개
-- [ ] ClawHub 실데이터 수집기(현재 mock)
+- [x] 기본 테스트 파일 + collector 테스트
+- [x] ClawHub 실데이터 수집기(공개 skills 페이지 HTML 파싱)
 - [ ] OpenClaw 설치 플로우 실연동
 - [ ] Discord/Telegram 실제 전송 연동
 
@@ -35,6 +35,16 @@ npm run test
 npm run typecheck
 npm run build
 ```
+
+## 실데이터 수집 동작
+- `src/collector/clawhubClient.ts`는 기본적으로 `https://clawhub.org/skills?nonSuspicious=true`를 조회합니다.
+- 페이지 내 `<script>` JSON(예: `__NEXT_DATA__`)에서 스킬 메타데이터를 찾아 `SkillMeta[]`로 정규화합니다.
+- 수집된 데이터는 그대로 추천 점수 계산과 주간 리포트 출력에 사용됩니다.
+
+## 한계 및 fallback
+- ClawHub 공개 페이지 구조가 바뀌면 파싱 정확도가 떨어질 수 있습니다.
+- 네트워크 실패/응답 오류/파싱 실패 시 경고 로그를 남기고 mock 데이터로 graceful fallback 합니다.
+- 현재는 공개 페이지 기반 경량 파싱이라, 비공개 지표나 정밀한 랭킹 정보는 반영하지 않습니다.
 
 ## 산출 예시
 - top 추천 리스트 + 보안 상태(`recommend/caution/hold/block`)
