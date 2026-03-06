@@ -241,9 +241,9 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
       }
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    console.warn(`[collector] ClawHub fetch failed (${reason}); falling back to mock data.`);
-    return fallbackResult(`FETCH_ERROR_${reason}`);
+    const reasonCode = error instanceof Error ? error.name || 'ERROR' : 'UNKNOWN';
+    console.warn(`[collector] ClawHub fetch failed (${reasonCode}); falling back to mock data.`);
+    return fallbackResult(`FETCH_ERROR_${reasonCode}`);
   }
 }
 

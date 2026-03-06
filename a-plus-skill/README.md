@@ -42,18 +42,16 @@ npm run dev
 # 기본(콘솔 출력 + 전송 off)
 npm run report:send
 
-# Discord DM 전송
-REPORT_DELIVERY=discord-dm \
-DISCORD_BOT_TOKEN=xxxxx \
-DISCORD_DM_USER_ID=123456789012345678 \
-npm run report:send
+# Discord DM 전송 (.env 또는 안전한 secret 주입 권장)
+REPORT_DELIVERY=discord-dm npm run report:send
 ```
+
+> 보안 주의: 토큰을 커맨드라인 인라인으로 넣지 마세요. shell history/process list에 남을 수 있습니다.
 
 ## cron 예시
 ```cron
-# 매주 월요일 09:00 UTC
-0 9 * * 1 cd /home/node/.openclaw/workspace/a-plus-skill && \
-REPORT_DELIVERY=discord-dm DISCORD_BOT_TOKEN=xxxxx DISCORD_DM_USER_ID=123456789012345678 npm run report:send
+# 매주 월요일 09:00 UTC (환경변수는 별도 envfile/systemd/secret store에서 주입)
+0 9 * * 1 cd /home/node/.openclaw/workspace/a-plus-skill && REPORT_DELIVERY=discord-dm npm run report:send
 ```
 
 ## 전송 실패 로그

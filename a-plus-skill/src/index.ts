@@ -48,7 +48,7 @@ async function main() {
 
     const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
     if (meta.degraded) {
-      reasons.push(`실데이터 수집 저하 상태: ${meta.fallbackReason ?? 'unknown'}`);
+      reasons.push('실데이터 수집 저하 상태: fallback 모드');
     }
     reasons.push(...installPlan.notes);
 

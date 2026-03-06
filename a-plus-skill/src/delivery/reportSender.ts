@@ -1,15 +1,22 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { sendDiscordDm } from './discordDm.js';
+import { createDiscordDmSender, DiscordDmError } from './discordDm.js';
 import type { CollectorMeta, ReportDeliveryResult } from '../types/index.js';
 
 const MAX_MESSAGE_LENGTH = 1900;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 300;
+const MAX_RETRY_AFTER_MS = 60_000;
 const DELIVERY_LOG_PATH = resolve(process.cwd(), 'data/report-delivery.log');
 
 type SenderFn = (content: string) => Promise<unknown>;
 type SleepFn = (ms: number) => Promise<void>;
+
+type ErrorInfo = {
+  code: string;
+  status?: number;
+  retryAfterMs?: number;
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -54,9 +61,44 @@ export function splitReportMessage(input: string, maxLen = MAX_MESSAGE_LENGTH): 
   return chunks;
 }
 
+function sanitizeError(error: unknown): ErrorInfo {
+  if (error instanceof DiscordDmError) {
+    return {
+      code: error.code,
+      status: error.status,
+      retryAfterMs: error.retryAfterMs
+    };
+  }
+
+  if (error instanceof Error) {
+    return { code: 'GENERIC_ERROR' };
+  }
+
+  return { code: 'UNKNOWN_ERROR' };
+}
+
 async function logFailure(message: string): Promise<void> {
-  await mkdir(dirname(DELIVERY_LOG_PATH), { recursive: true });
-  await appendFile(DELIVERY_LOG_PATH, `${new Date().toISOString()} ${message}\n`, 'utf8');
+  try {
+    await mkdir(dirname(DELIVERY_LOG_PATH), { recursive: true });
+    await appendFile(DELIVERY_LOG_PATH, `${new Date().toISOString()} ${message}\n`, 'utf8');
+  } catch {
+    // do not fail delivery flow due to logging failure
+  }
+}
+
+function isRetryable(info: ErrorInfo): boolean {
+  if (info.code === 'MISSING_CONFIG') return false;
+  if (info.status === 429) return true;
+  if (typeof info.status === 'number') return info.status >= 500;
+  return true; // unknown/network-like errors
+}
+
+function computeBackoffMs(info: ErrorInfo, attempt: number): number {
+  if (info.status === 429 && info.retryAfterMs && Number.isFinite(info.retryAfterMs)) {
+    const clamped = Math.min(Math.max(info.retryAfterMs, BASE_BACKOFF_MS), MAX_RETRY_AFTER_MS);
+    return clamped;
+  }
+  return BASE_BACKOFF_MS * 2 ** (attempt - 1);
 }
 
 export async function sendWeeklyReport(
@@ -70,12 +112,12 @@ export async function sendWeeklyReport(
   }
 
   if (mode !== 'discord-dm') {
-    const reason = `unsupported REPORT_DELIVERY: ${mode}`;
-    await logFailure(reason);
+    const reason = `unsupported REPORT_DELIVERY mode`;
+    await logFailure(`event=unsupported_mode mode=${mode}`);
     return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
   }
 
-  const sender = deps?.sender ?? ((content: string) => sendDiscordDm(content));
+  const sender = deps?.sender ?? createDiscordDmSender();
   const sleepImpl = deps?.sleepFn ?? sleep;
   const payload = meta
     ? `${report}\n\n(meta: source=${meta.source}, degraded=${meta.degraded}, fetchedAt=${meta.fetchedAt})`
@@ -95,14 +137,20 @@ export async function sendWeeklyReport(
         sent = true;
         break;
       } catch (error) {
-        const errText = error instanceof Error ? error.message : String(error);
-        const logLine = `chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} error=${errText}`;
-        await logFailure(logLine);
+        const info = sanitizeError(error);
+        await logFailure(
+          `event=delivery_failed chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${info.code}${
+            info.status ? ` status=${info.status}` : ''
+          }${info.retryAfterMs ? ` retry_after_ms=${info.retryAfterMs}` : ''}`
+        );
 
-        if (attempt < MAX_ATTEMPTS) {
-          const backoff = BASE_BACKOFF_MS * 2 ** (attempt - 1);
+        if (attempt < MAX_ATTEMPTS && isRetryable(info)) {
+          const backoff = computeBackoffMs(info, attempt);
           await sleepImpl(backoff);
+          continue;
         }
+
+        break;
       }
     }
 

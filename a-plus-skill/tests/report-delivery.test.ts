@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DiscordDmError } from '../src/delivery/discordDm.js';
 import { sendWeeklyReport } from '../src/delivery/reportSender.js';
 
 describe('report delivery', () => {
@@ -57,6 +58,80 @@ describe('report delivery', () => {
     expect(attempts).toBe(3);
     expect(result.success).toBe(false);
     expect(result.reason).toContain('failed at chunk');
+  });
+
+  it('uses retry_after on 429 errors', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
+
+    const sleeps: number[] = [];
+    let attempts = 0;
+    const result = await sendWeeklyReport('short-report', undefined, {
+      sender: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new DiscordDmError('SEND_DM_FAILED', 'rate limited', 429, 1500);
+        }
+      },
+      sleepFn: async (ms) => {
+        sleeps.push(ms);
+      }
+    });
+
+    expect(result.success).toBe(true);
+    expect(sleeps[0]).toBe(1500);
+  });
+
+  it('caps overly large retry_after on 429 errors', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
+
+    const sleeps: number[] = [];
+    let attempts = 0;
+    const result = await sendWeeklyReport('short-report', undefined, {
+      sender: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new DiscordDmError('SEND_DM_FAILED', 'rate limited', 429, 9999999);
+        }
+      },
+      sleepFn: async (ms) => {
+        sleeps.push(ms);
+      }
+    });
+
+    expect(result.success).toBe(true);
+    expect(sleeps[0]).toBe(60000);
+  });
+
+  it('does not retry non-retryable 401 errors', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
+
+    let attempts = 0;
+    const result = await sendWeeklyReport('short-report', undefined, {
+      sender: async () => {
+        attempts += 1;
+        throw new DiscordDmError('SEND_DM_FAILED', 'unauthorized', 401);
+      },
+      sleepFn: async () => {}
+    });
+
+    expect(attempts).toBe(1);
+    expect(result.success).toBe(false);
+  });
+
+  it('does not retry missing config errors', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
+
+    let attempts = 0;
+    const result = await sendWeeklyReport('short-report', undefined, {
+      sender: async () => {
+        attempts += 1;
+        throw new DiscordDmError('MISSING_CONFIG', 'missing DISCORD_BOT_TOKEN');
+      },
+      sleepFn: async () => {}
+    });
+
+    expect(attempts).toBe(1);
+    expect(result.success).toBe(false);
   });
 
   it('skips delivery when REPORT_DELIVERY=none', async () => {
