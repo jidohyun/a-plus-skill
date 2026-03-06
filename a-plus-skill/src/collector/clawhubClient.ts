@@ -1,6 +1,8 @@
-import type { SkillMeta } from '../types/index.js';
+import type { CollectorResult, SkillMeta } from '../types/index.js';
 
-const CLAWHUB_SKILLS_URL = 'https://clawhub.org/skills?nonSuspicious=true';
+const DEFAULT_CLAWHUB_SKILLS_URL = 'https://clawhub.ai/skills?nonSuspicious=true';
+const ALLOWED_HOSTS = new Set(['clawhub.ai', 'www.clawhub.ai', 'clawhub.org', 'www.clawhub.org']);
+const MIN_PARSED_SKILLS = 3;
 
 type FetchLike = typeof fetch;
 
@@ -32,6 +34,29 @@ const MOCK_SKILLS: SkillMeta[] = [
     updatedAt: new Date().toISOString()
   }
 ];
+
+function resolveSkillsUrl(): string {
+  const raw = process.env.CLAWHUB_BASE_URL?.trim() || DEFAULT_CLAWHUB_SKILLS_URL;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return DEFAULT_CLAWHUB_SKILLS_URL;
+  }
+
+  if (!ALLOWED_HOSTS.has(parsed.hostname)) {
+    console.warn(`[collector] Disallowed ClawHub host: ${parsed.hostname}. Falling back to default host.`);
+    return DEFAULT_CLAWHUB_SKILLS_URL;
+  }
+
+  const hasExpectedPath = parsed.pathname.includes('/skills');
+  if (!hasExpectedPath) {
+    console.warn(`[collector] Unexpected ClawHub path: ${parsed.pathname}. Falling back to default skills URL.`);
+    return DEFAULT_CLAWHUB_SKILLS_URL;
+  }
+
+  return parsed.toString();
+}
 
 function asNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -81,11 +106,15 @@ function findSkillLikeItems(node: unknown, out: Record<string, unknown>[] = []):
 
   const rec = node as Record<string, unknown>;
   const hasIdentity = typeof rec.slug === 'string' || typeof rec.name === 'string';
-  const hasSignals =
-    typeof rec.downloads === 'number' ||
-    typeof rec.stars === 'number' ||
-    typeof rec.installsCurrent === 'number' ||
-    typeof rec.installCount === 'number';
+  const hasSignals = [
+    'downloads',
+    'downloadCount',
+    'stars',
+    'starCount',
+    'installsCurrent',
+    'installCount',
+    'activeInstalls'
+  ].some((key) => key in rec);
 
   if (hasIdentity && hasSignals) out.push(rec);
 
@@ -126,9 +155,10 @@ function normalizeSkill(raw: Record<string, unknown>): SkillMeta | null {
       : 'low';
 
   const updatedRaw = raw.updatedAt ?? raw.updated_at ?? raw.lastUpdated;
-  const updatedAt = typeof updatedRaw === 'string' && !Number.isNaN(Date.parse(updatedRaw))
-    ? new Date(updatedRaw).toISOString()
-    : new Date().toISOString();
+  const updatedAt =
+    typeof updatedRaw === 'string' && !Number.isNaN(Date.parse(updatedRaw))
+      ? new Date(updatedRaw).toISOString()
+      : new Date().toISOString();
 
   return {
     slug,
@@ -160,9 +190,27 @@ export function parseSkillsFromHtml(html: string): SkillMeta[] {
   return [...deduped.values()];
 }
 
-export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<SkillMeta[]> {
+function cloneMockSkills(): SkillMeta[] {
+  return MOCK_SKILLS.map((skill) => ({ ...skill }));
+}
+
+function fallbackResult(reason: string): CollectorResult {
+  return {
+    skills: cloneMockSkills(),
+    meta: {
+      source: 'fallback',
+      degraded: true,
+      fallbackReason: reason,
+      fetchedAt: new Date().toISOString()
+    }
+  };
+}
+
+export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<CollectorResult> {
+  const skillsUrl = resolveSkillsUrl();
+
   try {
-    const response = await fetcher(CLAWHUB_SKILLS_URL, {
+    const response = await fetcher(skillsUrl, {
       headers: {
         'user-agent': 'a-plus-skill/0.1',
         accept: 'text/html,application/xhtml+xml'
@@ -170,23 +218,32 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
     });
 
     if (!response.ok) {
+      const reason = `HTTP_${response.status}`;
       console.warn(`[collector] ClawHub request failed: ${response.status} ${response.statusText}`);
-      return MOCK_SKILLS;
+      return fallbackResult(reason);
     }
 
     const html = await response.text();
     const parsed = parseSkillsFromHtml(html);
 
-    if (parsed.length === 0) {
-      console.warn('[collector] ClawHub parse yielded no skills; falling back to mock data.');
-      return MOCK_SKILLS;
+    if (parsed.length < MIN_PARSED_SKILLS) {
+      const reason = `PARSE_BELOW_THRESHOLD_${parsed.length}`;
+      console.warn(`[collector] ClawHub parse yielded ${parsed.length} skills (<${MIN_PARSED_SKILLS}); falling back.`);
+      return fallbackResult(reason);
     }
 
-    return parsed;
+    return {
+      skills: parsed,
+      meta: {
+        source: 'live',
+        degraded: false,
+        fetchedAt: new Date().toISOString()
+      }
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[collector] ClawHub fetch failed (${reason}); falling back to mock data.`);
-    return MOCK_SKILLS;
+    return fallbackResult(`FETCH_ERROR_${reason}`);
   }
 }
 

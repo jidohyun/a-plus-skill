@@ -37,13 +37,16 @@ npm run build
 ```
 
 ## 실데이터 수집 동작
-- `src/collector/clawhubClient.ts`는 기본적으로 `https://clawhub.org/skills?nonSuspicious=true`를 조회합니다.
+- `src/collector/clawhubClient.ts`는 기본적으로 `https://clawhub.ai/skills?nonSuspicious=true`를 조회합니다.
+- 필요 시 `CLAWHUB_BASE_URL` 환경변수로 수집 URL을 바꿀 수 있으며, 허용 호스트 allowlist(`clawhub.ai`, `clawhub.org`)를 벗어나면 기본 URL로 되돌립니다.
 - 페이지 내 `<script>` JSON(예: `__NEXT_DATA__`)에서 스킬 메타데이터를 찾아 `SkillMeta[]`로 정규화합니다.
 - 수집된 데이터는 그대로 추천 점수 계산과 주간 리포트 출력에 사용됩니다.
 
 ## 한계 및 fallback
 - ClawHub 공개 페이지 구조가 바뀌면 파싱 정확도가 떨어질 수 있습니다.
-- 네트워크 실패/응답 오류/파싱 실패 시 경고 로그를 남기고 mock 데이터로 graceful fallback 합니다.
+- 네트워크 실패/응답 오류/파싱 실패(또는 품질 임계치 미달) 시 mock 데이터로 fallback 합니다.
+- fallback 시 메타데이터(`source`, `degraded`, `fallbackReason`, `fetchedAt`)를 함께 반환해 조용한 실패를 방지합니다.
+- degraded 상태에서는 추천 결정을 보수적으로 `hold`로 강제합니다.
 - 현재는 공개 페이지 기반 경량 파싱이라, 비공개 지표나 정밀한 랭킹 정보는 반영하지 않습니다.
 
 ## 산출 예시

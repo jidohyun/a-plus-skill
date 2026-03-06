@@ -19,7 +19,7 @@ function pseudoStability(versions: number) {
 }
 
 async function main() {
-  const skills = await fetchCandidateSkills();
+  const { skills, meta } = await fetchCandidateSkills();
   const results: RecommendationResult[] = skills.map((s) => {
     const fitScore = pseudoFit(s.slug);
     const trendScore = pseudoTrend(s.downloads);
@@ -31,7 +31,14 @@ async function main() {
       stability: stabilityScore,
       security
     });
-    const decision = decide('balanced', finalScore, security);
+
+    const policyDecision = decide('balanced', finalScore, security);
+    const decision = meta.degraded ? 'hold' : policyDecision;
+
+    const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
+    if (meta.degraded) {
+      reasons.push(`실데이터 수집 저하 상태: ${meta.fallbackReason ?? 'unknown'}`);
+    }
 
     return {
       slug: s.slug,
@@ -41,11 +48,11 @@ async function main() {
       securityScore: Math.round(security),
       finalScore,
       decision,
-      reasons: buildReasons({ fitScore, trendScore, securityScore: security })
+      reasons
     };
   });
 
-  console.log(renderWeeklyReport(results));
+  console.log(renderWeeklyReport(results, meta));
 }
 
 main().catch((err) => {

@@ -24,3 +24,15 @@ export type RecommendationResult = {
   decision: 'recommend' | 'caution' | 'hold' | 'block';
   reasons: string[];
 };
+
+export type CollectorMeta = {
+  source: 'live' | 'fallback';
+  degraded: boolean;
+  fallbackReason?: string;
+  fetchedAt: string;
+};
+
+export type CollectorResult = {
+  skills: SkillMeta[];
+  meta: CollectorMeta;
+};
