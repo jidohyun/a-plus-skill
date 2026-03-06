@@ -5,10 +5,11 @@ export function renderWeeklyReport(items: RecommendationResult[], meta: Collecto
   const head = `📊 A+ 주간 추천 리포트\nsource=${mode} fetchedAt=${meta.fetchedAt}\n`;
   const body = items
     .slice(0, 5)
-    .map(
-      (it, i) =>
-        `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}`
-    )
+    .map((it, i) => {
+      const outcome = it.installOutcome ? ` | outcome ${it.installOutcome.status}` : '';
+      const action = it.installAction ? ` | action ${it.installAction}` : '';
+      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}`;
+    })
     .join('\n');
 
   return `${head}\n${body}`;

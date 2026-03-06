@@ -11,7 +11,7 @@ OpenClaw 스킬 추천에 보안 심사를 기본 결합한 로컬 우선 MVP입
 - [x] 주간 리포트 문자열 렌더러
 - [x] 기본 테스트 파일 + collector 테스트
 - [x] ClawHub 실데이터 수집기(공개 skills 페이지 HTML 파싱)
-- [ ] OpenClaw 설치 플로우 실연동
+- [x] OpenClaw 설치 플로우 실연동 (decision→install action + policy override + outcome 수집)
 - [ ] Discord/Telegram 실제 전송 연동
 
 ## 폴더
@@ -49,6 +49,25 @@ npm run build
 - degraded 상태에서는 추천 결정을 보수적으로 `hold`로 강제합니다.
 - 현재는 공개 페이지 기반 경량 파싱이라, 비공개 지표나 정밀한 랭킹 정보는 반영하지 않습니다.
 
+## 설치 플로우 정책(신규)
+- decision(`recommend/caution/hold/block`)을 install action으로 변환합니다.
+- 수집 degraded(`meta.degraded=true`)이면 `effectiveDecision=hold`로 강제합니다.
+- 정책별 우회 규칙:
+  - `strict`: hold는 `INSTALL_OVERRIDE_TOKEN` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
+  - `balanced`: hold는 override 가능, block은 `INSTALL_OVERRIDE_TOKEN` + `INSTALL_OVERRIDE_STRONG_TOKEN` + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요
+  - `fast`: hold/block 모두 `INSTALL_OVERRIDE_TOKEN` + `INSTALL_CONFIRM=true`로 허용
+- 기본값은 안전 모드: 확인/우회가 없으면 hold/block 설치는 실행되지 않습니다.
+
+### 설치 관련 환경변수
+- `INSTALL_POLICY`: `strict | balanced | fast` (기본 `balanced`)
+- `INSTALL_CONFIRM`: `true/1/yes`일 때만 확인 완료로 간주
+- `INSTALL_OVERRIDE_TOKEN`: hold/block 우회 토큰
+- `INSTALL_OVERRIDE_STRONG_TOKEN`: balanced block 우회용 추가 토큰
+- `INSTALL_OVERRIDE_REASON`: balanced block 우회 사유
+- `OPENCLAW_INSTALL_COMMAND`: 실제 설치 커맨드 베이스 (기본 `openclaw skill install`)
+
 ## 산출 예시
 - top 추천 리스트 + 보안 상태(`recommend/caution/hold/block`)
+- install action(`auto-install/override-install/confirm-install/skip-install`)
+- 구조화된 설치 실행 결과(`installed/skipped/failed`)
 - 주간 리포트 텍스트

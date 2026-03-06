@@ -1,5 +1,7 @@
 import { fetchCandidateSkills } from './collector/clawhubClient.js';
-import { decide } from './policy/policyEngine.js';
+import { loadInstallPolicyContextFromEnv, loadPolicyFromEnv } from './install/confirm.js';
+import { runInstall } from './install/openclawInstaller.js';
+import { decide, planInstallAction } from './policy/policyEngine.js';
 import { buildReasons } from './recommender/explain.js';
 import { calculateFinalScore } from './recommender/scoring.js';
 import { renderWeeklyReport } from './report/weeklyReport.js';
@@ -20,7 +22,12 @@ function pseudoStability(versions: number) {
 
 async function main() {
   const { skills, meta } = await fetchCandidateSkills();
-  const results: RecommendationResult[] = skills.map((s) => {
+  const policy = loadPolicyFromEnv('balanced');
+  const installContext = loadInstallPolicyContextFromEnv();
+
+  const results: RecommendationResult[] = [];
+
+  for (const s of skills) {
     const fitScore = pseudoFit(s.slug);
     const trendScore = pseudoTrend(s.downloads);
     const stabilityScore = pseudoStability(s.versions);
@@ -32,25 +39,33 @@ async function main() {
       security
     });
 
-    const policyDecision = decide('balanced', finalScore, security);
-    const decision = meta.degraded ? 'hold' : policyDecision;
+    const policyDecision = decide(policy, finalScore, security);
+    const installPlan = planInstallAction(policy, policyDecision, {
+      ...installContext,
+      degraded: meta.degraded
+    });
 
     const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
     if (meta.degraded) {
       reasons.push(`실데이터 수집 저하 상태: ${meta.fallbackReason ?? 'unknown'}`);
     }
+    reasons.push(...installPlan.notes);
 
-    return {
+    const installOutcome = await runInstall(s.slug, installPlan);
+
+    results.push({
       slug: s.slug,
       fitScore,
       trendScore,
       stabilityScore,
       securityScore: Math.round(security),
       finalScore,
-      decision,
-      reasons
-    };
-  });
+      decision: installPlan.effectiveDecision,
+      reasons,
+      installAction: installPlan.action,
+      installOutcome
+    });
+  }
 
   console.log(renderWeeklyReport(results, meta));
 }

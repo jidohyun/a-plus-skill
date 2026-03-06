@@ -14,6 +14,38 @@ export type SkillMeta = {
   updatedAt: string;
 };
 
+export type InstallAction = 'auto-install' | 'override-install' | 'confirm-install' | 'skip-install';
+
+export type InstallPolicyContext = {
+  degraded?: boolean;
+  confirmed?: boolean;
+  overrideToken?: string;
+  strongOverrideToken?: string;
+  overrideReason?: string;
+};
+
+export type InstallPlan = {
+  policy: Policy;
+  originalDecision: RecommendationResult['decision'];
+  effectiveDecision: RecommendationResult['decision'];
+  action: InstallAction;
+  canInstall: boolean;
+  notes: string[];
+};
+
+export type InstallOutcome = {
+  slug: string;
+  action: InstallAction;
+  attempted: boolean;
+  installed: boolean;
+  status: 'installed' | 'skipped' | 'failed';
+  command?: string;
+  code?: number | null;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+};
+
 export type RecommendationResult = {
   slug: string;
   fitScore: number;
@@ -23,6 +55,8 @@ export type RecommendationResult = {
   finalScore: number;
   decision: 'recommend' | 'caution' | 'hold' | 'block';
   reasons: string[];
+  installAction?: InstallAction;
+  installOutcome?: InstallOutcome;
 };
 
 export type CollectorMeta = {
