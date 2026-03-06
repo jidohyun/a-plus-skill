@@ -5,6 +5,7 @@ import { decide, planInstallAction } from './policy/policyEngine.js';
 import { buildReasons } from './recommender/explain.js';
 import { calculateFinalScore } from './recommender/scoring.js';
 import { renderWeeklyReport } from './report/weeklyReport.js';
+import { sendWeeklyReport } from './delivery/reportSender.js';
 import { securityScore } from './security/riskScoring.js';
 import type { RecommendationResult } from './types/index.js';
 
@@ -67,7 +68,13 @@ async function main() {
     });
   }
 
-  console.log(renderWeeklyReport(results, meta));
+  const report = renderWeeklyReport(results, meta);
+  console.log(report);
+
+  const delivery = await sendWeeklyReport(report, meta);
+  if (!delivery.skipped && !delivery.success) {
+    console.warn(`[delivery] report send failed: ${delivery.reason ?? 'unknown'}`);
+  }
 }
 
 main().catch((err) => {

@@ -70,3 +70,14 @@ export type CollectorResult = {
   skills: SkillMeta[];
   meta: CollectorMeta;
 };
+
+export type ReportDeliveryMode = 'none' | 'discord-dm';
+
+export type ReportDeliveryResult = {
+  skipped: boolean;
+  mode: ReportDeliveryMode;
+  success?: boolean;
+  reason?: string;
+  chunksAttempted: number;
+  chunksSent: number;
+};

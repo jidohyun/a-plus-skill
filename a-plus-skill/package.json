@@ -9,6 +9,7 @@
     "prebuild": "node scripts/preflight.mjs",
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx src/index.ts",
+    "report:send": "node --import tsx src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

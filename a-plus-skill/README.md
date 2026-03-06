@@ -12,7 +12,7 @@ OpenClaw 스킬 추천에 보안 심사를 기본 결합한 로컬 우선 MVP입
 - [x] 기본 테스트 파일 + collector 테스트
 - [x] ClawHub 실데이터 수집기(공개 skills 페이지 HTML 파싱)
 - [x] OpenClaw 설치 플로우 실연동 (decision→install action + policy override + outcome 수집)
-- [ ] Discord/Telegram 실제 전송 연동
+- [x] Discord DM 실제 전송 연동(분할/재시도/실패 로그)
 
 ## 폴더
 - `src/collector`: 후보 스킬 수집
@@ -20,6 +20,7 @@ OpenClaw 스킬 추천에 보안 심사를 기본 결합한 로컬 우선 MVP입
 - `src/security`: 보안 규칙/점수화
 - `src/policy`: 설치 정책 결정
 - `src/report`: 주간 리포트 생성
+- `src/delivery`: 리포트 전송(Discord DM)
 
 ## 실행
 ```bash
@@ -28,6 +29,37 @@ npm run dev
 ```
 
 > preflight가 devDependencies(typescript/vitest/tsx) 누락 시 즉시 실패시킵니다.
+
+## 리포트 전송 설정 (Discord DM)
+- `REPORT_DELIVERY`: `none | discord-dm` (기본 `none`)
+- `DISCORD_BOT_TOKEN`: Discord Bot 토큰 (`Bot <token>` 인증에 사용)
+- `DISCORD_DM_USER_ID`: DM 수신 대상 Discord user id
+
+`REPORT_DELIVERY=none`이면 전송을 스킵하고 기존 콘솔 출력만 수행합니다.
+
+## 리포트 실행
+```bash
+# 기본(콘솔 출력 + 전송 off)
+npm run report:send
+
+# Discord DM 전송
+REPORT_DELIVERY=discord-dm \
+DISCORD_BOT_TOKEN=xxxxx \
+DISCORD_DM_USER_ID=123456789012345678 \
+npm run report:send
+```
+
+## cron 예시
+```cron
+# 매주 월요일 09:00 UTC
+0 9 * * 1 cd /home/node/.openclaw/workspace/a-plus-skill && \
+REPORT_DELIVERY=discord-dm DISCORD_BOT_TOKEN=xxxxx DISCORD_DM_USER_ID=123456789012345678 npm run report:send
+```
+
+## 전송 실패 로그
+- 경로: `data/report-delivery.log`
+- 기록 내용: chunk 번호/시도 횟수/에러 메시지
+- 재시도: chunk별 최대 3회 (지수 백오프)
 
 ## 테스트
 ```bash
