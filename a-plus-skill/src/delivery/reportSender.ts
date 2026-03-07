@@ -95,6 +95,11 @@ function sanitizeError(error: unknown): ErrorInfo {
     return { code: (error as { code: string }).code, status, retryAfterMs };
   }
 
+  if (error instanceof TypeError) {
+    // fetch/network level errors are typically TypeError in Node/Web fetch
+    return { code: 'NETWORK_ERROR' };
+  }
+
   if (error instanceof Error) {
     return { code: 'GENERIC_ERROR' };
   }
@@ -113,10 +118,11 @@ async function logFailure(message: string): Promise<void> {
 
 function isRetryable(info: ErrorInfo): boolean {
   if (info.code === 'MISSING_CONFIG') return false;
+  if (info.code === 'GENERIC_ERROR' || info.code === 'UNKNOWN_ERROR') return false;
   if (typeof info.status === 'number' && info.status >= 400 && info.status < 500 && info.status !== 429) return false;
   if (info.status === 429) return true;
   if (typeof info.status === 'number') return info.status >= 500;
-  return true; // unknown/network-like errors
+  return info.code === 'NETWORK_ERROR';
 }
 
 function computeBackoffMs(info: ErrorInfo, attempt: number): number {
@@ -188,6 +194,7 @@ export async function sendWeeklyReport(
   for (let idx = 0; idx < chunks.length; idx += 1) {
     const chunk = chunks[idx]!;
     let sent = false;
+    let lastError: ErrorInfo | undefined;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -197,6 +204,7 @@ export async function sendWeeklyReport(
         break;
       } catch (error) {
         const info = sanitizeError(error);
+        lastError = info;
         const safeCode = sanitizeCode(info.code);
         await logFailure(
           `event=delivery_failed mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${safeCode}${
@@ -215,13 +223,15 @@ export async function sendWeeklyReport(
     }
 
     if (!sent) {
+      const safeCode = sanitizeCode(lastError?.code ?? 'UNKNOWN_ERROR');
+      const statusPart = lastError?.status ? ` status=${lastError.status}` : '';
       return {
         skipped: false,
         mode,
         success: false,
         chunksAttempted: chunks.length,
         chunksSent,
-        reason: `failed at chunk ${idx + 1}`
+        reason: `failed at chunk ${idx + 1} code=${safeCode}${statusPart}`
       };
     }
   }

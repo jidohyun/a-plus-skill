@@ -73,7 +73,11 @@ async function main() {
 
   const delivery = await sendWeeklyReport(report, meta);
   if (!delivery.skipped && !delivery.success) {
-    console.warn(`[delivery] report send failed: ${delivery.reason ?? 'unknown'}`);
+    console.error(`[delivery] report send failed: ${delivery.reason ?? 'unknown'}`);
+    const failHard = (process.env.REPORT_DELIVERY_FAIL_HARD ?? 'true').trim().toLowerCase();
+    if (failHard === 'true' || failHard === '1' || failHard === 'yes') {
+      throw new Error(`delivery_failed: ${delivery.reason ?? 'unknown'}`);
+    }
   }
 }
 

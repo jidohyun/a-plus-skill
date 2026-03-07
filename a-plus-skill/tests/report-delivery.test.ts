@@ -46,14 +46,14 @@ describe('report delivery', () => {
     expect(sent.every((s) => s.length <= 4000)).toBe(true);
   });
 
-  it('retries and succeeds before max attempts', async () => {
+  it('retries network errors and succeeds before max attempts', async () => {
     vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
 
     let attempts = 0;
     const result = await sendWeeklyReport('short-report', undefined, {
       sender: async () => {
         attempts += 1;
-        if (attempts < 3) throw new Error('temporary failure');
+        if (attempts < 3) throw new TypeError('temporary network failure');
       },
       sleepFn: async () => {}
     });
@@ -63,14 +63,14 @@ describe('report delivery', () => {
     expect(result.chunksSent).toBe(1);
   });
 
-  it('fails after max retries', async () => {
+  it('fails after max retries for persistent network errors', async () => {
     vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
 
     let attempts = 0;
     const result = await sendWeeklyReport('short-report', undefined, {
       sender: async () => {
         attempts += 1;
-        throw new Error('permanent failure');
+        throw new TypeError('permanent network failure');
       },
       sleepFn: async () => {}
     });
@@ -151,6 +151,22 @@ describe('report delivery', () => {
       sender: async () => {
         attempts += 1;
         throw new DiscordDmError('SEND_DM_FAILED', 'unauthorized', 401);
+      },
+      sleepFn: async () => {}
+    });
+
+    expect(attempts).toBe(1);
+    expect(result.success).toBe(false);
+  });
+
+  it('does not retry generic non-network errors', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
+
+    let attempts = 0;
+    const result = await sendWeeklyReport('short-report', undefined, {
+      sender: async () => {
+        attempts += 1;
+        throw new Error('logic failure');
       },
       sleepFn: async () => {}
     });
