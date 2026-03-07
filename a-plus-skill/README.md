@@ -191,19 +191,42 @@ npm run collector:status -- --strict
 - 형식: 한 줄당 1개 JSON 이벤트(기계 판독 가능)
 - 기록 시점: 각 skill 설치 시도 종료 시점(단일 통합 이벤트: decision+plan+outcome)
 - 포함 필드(요약):
-  - `ts`, `slug`, `policy`, `topology`
-  - `originalDecision`, `effectiveDecision`
-  - `action`, `canInstall`, `status`
-  - `errorCode`, `timeoutMs`, `elapsedMs`
-  - `degraded`, `notes[]`
+  - 무결성 필드: `schemaVersion`, `eventId`, `prevHash`, `hash`
+  - 기본 필드: `ts`, `slug`, `policy`, `topology`
+  - 결정/실행 필드: `originalDecision`, `effectiveDecision`, `action`, `canInstall`, `status`
+  - 오류/성능 필드: `errorCode`, `timeoutMs`, `elapsedMs`
+  - 상태 필드: `degraded`, `notes[]`
+- `prevHash`는 직전 이벤트의 `hash`와 연결됩니다(첫 이벤트는 `genesis`).
+- `hash`는 canonical payload 기준 `SHA-256`으로 계산되어 변조/누락 사후 검증에 사용됩니다.
 - 이벤트는 `skip-install/confirm-install/auto-install/override-install` 모두 기록됩니다.
 - 로그 쓰기 실패는 설치 플로우를 중단하지 않고 경고만 남깁니다.
 - 보안: note/error의 `token/secret` 및 `ovr1...` override token 패턴은 마스킹되어 기록됩니다.
 
 예시:
 ```json
-{"ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","degraded":false,"notes":["hold requires strong override token + reason + confirmation"]}
+{"schemaVersion":1,"eventId":"b7b4a276-1efe-498f-b9fa-d91d9323120e","ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","degraded":false,"notes":["hold requires strong override token + reason + confirmation"],"prevHash":"genesis","hash":"f56d..."}
 ```
+
+#### 감사 로그 무결성 검증
+```bash
+# 기본 경로(data/install-events.jsonl) 검증
+npm run audit:verify
+
+# 사용자 지정 로그 경로 검증
+INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
+```
+
+- 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
+- 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`
+  - `hash mismatch`: 특정 라인 내용이 변조되었을 가능성
+  - `prevHash mismatch`: 중간 라인 삭제/누락으로 체인이 단절되었을 가능성
+  - `malformed JSON`: 파일 깨짐 또는 수동 편집 오류
+
+실패 시 대응 가이드:
+1. 즉시 현재 로그 파일을 백업합니다.
+2. 최근 배포/운영 변경 이력과 파일 접근 이력을 확인합니다.
+3. 신뢰 가능한 백업/원본에서 로그를 복구하거나, 손상 구간 이후 이벤트를 별도 보관 후 재수집합니다.
+4. 필요 시 `INSTALL_AUDIT_LOG_PATH`를 새 파일로 전환하고, 장애 보고에 손상 line/reason을 포함합니다.
 
 #### Override token 형식 (`ovr1`)
 - 포맷: `ovr1.<iat>.<exp>.<nonce>.<sig>`

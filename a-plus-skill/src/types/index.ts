@@ -66,6 +66,8 @@ export type InstallOutcome = {
 };
 
 export type InstallAuditEvent = {
+  schemaVersion: number;
+  eventId: string;
   ts: string;
   slug: string;
   policy: Policy;
@@ -80,6 +82,8 @@ export type InstallAuditEvent = {
   elapsedMs?: number;
   degraded: boolean;
   notes: string[];
+  prevHash: string;
+  hash: string;
 };
 
 export type RecommendationResult = {

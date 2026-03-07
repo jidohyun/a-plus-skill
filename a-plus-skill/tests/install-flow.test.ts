@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultRunner,
@@ -42,6 +43,17 @@ function createFakeChild(pid = 4321): FakeChild {
   child.pid = pid;
   child.kill = vi.fn(() => true);
   return child;
+}
+
+function runAuditVerify(logPath: string): ReturnType<typeof spawnSync> {
+  return spawnSync('node', ['--import', 'tsx', 'scripts/install-audit-verify.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      INSTALL_AUDIT_LOG_PATH: logPath
+    },
+    encoding: 'utf8'
+  });
 }
 
 beforeEach(() => {
@@ -393,6 +405,66 @@ describe('install flow', () => {
     const raw = readFileSync(logPath, 'utf8');
     expect(raw).not.toContain(token);
     expect(raw).toContain('[REDACTED_OVERRIDE_TOKEN]');
+  });
+
+  it('verifies valid audit hash chain', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    await runInstall('demo/a', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+    await runInstall('demo/b', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK verified=2');
+  });
+
+  it('fails audit verify on tampered line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    await runInstall('demo/tampered', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    const event = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
+    event.status = 'failed';
+    lines[0] = JSON.stringify(event);
+    writeFileSync(logPath, `${lines.join('\n')}\n`, 'utf8');
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('hash mismatch');
+  });
+
+  it('fails audit verify on deleted line chain break', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    await runInstall('demo/first', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+    await runInstall('demo/second', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    writeFileSync(logPath, `${lines.slice(1).join('\n')}\n`, 'utf8');
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('prevHash mismatch');
+  });
+
+  it('fails audit verify on malformed JSON', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    writeFileSync(logPath, '{"broken":true\n', 'utf8');
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('malformed JSON');
   });
 
   it('continues install flow when audit log write fails', async () => {

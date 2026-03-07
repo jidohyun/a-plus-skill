@@ -1,5 +1,6 @@
+import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
 import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
@@ -229,11 +230,69 @@ function getInstallAuditPath(): string {
   return resolve(process.cwd(), 'data', 'install-events.jsonl');
 }
 
-export function writeInstallAuditEvent(event: InstallAuditEvent): void {
+const INSTALL_AUDIT_SCHEMA_VERSION = 1;
+const GENESIS_PREV_HASH = 'genesis';
+
+type InstallAuditPayload = Omit<InstallAuditEvent, 'hash'>;
+
+function canonicalStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalStringify(item)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function computeAuditHash(payload: InstallAuditPayload): string {
+  return createHash('sha256').update(canonicalStringify(payload), 'utf8').digest('hex');
+}
+
+function readPreviousAuditHash(file: string): string {
+  try {
+    const raw = readFileSync(file, 'utf8');
+    const lines = raw.split('\n');
+
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      const parsed = JSON.parse(line) as Partial<InstallAuditEvent>;
+      if (typeof parsed.hash === 'string' && parsed.hash.length > 0) {
+        return parsed.hash;
+      }
+      break;
+    }
+  } catch {
+    // no-op: missing file/invalid JSON falls back to genesis
+  }
+
+  return GENESIS_PREV_HASH;
+}
+
+export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | 'prevHash' | 'eventId' | 'schemaVersion'>): void {
   try {
     const file = getInstallAuditPath();
     mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
+
+    const payload: InstallAuditPayload = {
+      schemaVersion: INSTALL_AUDIT_SCHEMA_VERSION,
+      eventId: randomUUID(),
+      prevHash: readPreviousAuditHash(file),
+      ...event
+    };
+    const signedEvent: InstallAuditEvent = {
+      ...payload,
+      hash: computeAuditHash(payload)
+    };
+
+    appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[install-audit] failed to append JSONL event: ${sanitizeSensitiveText(reason)}`);
@@ -249,7 +308,7 @@ function emitInstallAuditEvent(
   const topology = options.topology ?? loadInstallTopologyFromEnv('single-instance');
   const degraded = options.degraded ?? plan.notes.some((note) => note.includes('degraded mode'));
 
-  const event: InstallAuditEvent = {
+  const event: Omit<InstallAuditEvent, 'hash' | 'prevHash' | 'eventId' | 'schemaVersion'> = {
     ts: new Date().toISOString(),
     slug,
     policy: plan.policy,
