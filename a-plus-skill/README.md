@@ -202,7 +202,7 @@ npm run collector:status -- --strict
 
 예시:
 ```json
-{"ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","errorCode":"INSTALL_RUNTIME_ERROR","degraded":false,"notes":["hold requires strong override token + reason + confirmation"]}
+{"ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","degraded":false,"notes":["hold requires strong override token + reason + confirmation"]}
 ```
 
 #### Override token 형식 (`ovr1`)

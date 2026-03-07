@@ -301,6 +301,7 @@ describe('install flow', () => {
     expect(event.action).toBe('confirm-install');
     expect(event.canInstall).toBe(false);
     expect(event.status).toBe('skipped');
+    expect(event.errorCode).toBeUndefined();
   });
 
   it('writes success/failure/timeout audit fields', async () => {
@@ -328,12 +329,33 @@ describe('install flow', () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
     expect(events[0]?.status).toBe('installed');
+    expect(events[0]?.errorCode).toBeUndefined();
     expect(events[1]?.status).toBe('failed');
     expect(events[1]?.errorCode).toBe('INSTALL_COMMAND_FAILED');
     expect(events[2]?.status).toBe('failed');
     expect(events[2]?.errorCode).toBe('INSTALL_TIMEOUT');
     expect(events[2]?.elapsedMs).toBe(1500);
     expect(events[2]?.timeoutMs).toBe(1000);
+  });
+
+  it('keeps INSTALL_RUNTIME_ERROR for failed runtime error path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    await runInstall('demo/runtime-error', plan, async () => ({
+      code: null,
+      stdout: '',
+      stderr: 'spawn EACCES',
+      error: 'spawn EACCES',
+      elapsedMs: 42,
+      timeoutMs: 1000
+    }));
+
+    const event = JSON.parse(readFileSync(logPath, 'utf8').trim()) as Record<string, unknown>;
+    expect(event.status).toBe('failed');
+    expect(event.errorCode).toBe('INSTALL_RUNTIME_ERROR');
   });
 
   it('records degraded hold in audit event', async () => {

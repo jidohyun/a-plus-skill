@@ -204,8 +204,12 @@ function sanitizeNotes(notes: string[]): string[] {
 }
 
 function classifyErrorCode(outcome: InstallOutcome): string | undefined {
+  if (outcome.status !== 'failed') {
+    return undefined;
+  }
+
   if (!outcome.error) {
-    if (outcome.status === 'failed' && outcome.code && outcome.code !== 0) {
+    if (outcome.code && outcome.code !== 0) {
       return 'INSTALL_COMMAND_FAILED';
     }
     return undefined;
