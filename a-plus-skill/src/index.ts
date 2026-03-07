@@ -1,27 +1,53 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { fetchCandidateSkills } from './collector/clawhubClient.js';
 import { loadInstallPolicyContextFromEnv, loadPolicyFromEnv } from './install/confirm.js';
 import { runInstall } from './install/openclawInstaller.js';
 import { decide, planInstallAction } from './policy/policyEngine.js';
 import { buildReasons } from './recommender/explain.js';
-import { calculateFinalScore } from './recommender/scoring.js';
+import {
+  calculateFinalScore,
+  calculateFitScore,
+  calculateStabilityScore,
+  calculateTrendScore
+} from './recommender/scoring.js';
 import { renderWeeklyReport } from './report/weeklyReport.js';
 import { sendWeeklyReport } from './delivery/reportSender.js';
 import { securityScore } from './security/riskScoring.js';
-import type { RecommendationResult } from './types/index.js';
+import type { ProfileConfig, ProfileRegistry, ProfileType, RecommendationResult } from './types/index.js';
 
-function pseudoFit(slug: string) {
-  return slug.includes('weather') ? 82 : 70;
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const profileConfigPath = resolve(currentDir, '../config/profile.default.json');
+
+function isProfileType(value: string): value is ProfileType {
+  return value === 'developer' || value === 'automation' || value === 'assistant';
 }
 
-function pseudoTrend(downloads: number) {
-  return Math.min(95, Math.round(downloads / 1000));
-}
+async function loadProfile(): Promise<ProfileConfig> {
+  const fileContent = await readFile(profileConfigPath, 'utf8');
+  const registry = JSON.parse(fileContent) as ProfileRegistry;
 
-function pseudoStability(versions: number) {
-  return Math.min(90, 50 + versions * 3);
+  const envProfileRaw = (process.env.PROFILE_TYPE ?? '').trim().toLowerCase();
+  const profileType = isProfileType(envProfileRaw)
+    ? envProfileRaw
+    : (registry.defaultProfile ?? 'developer');
+
+  const profileData = registry.profiles?.[profileType] ?? registry.profiles?.developer;
+  if (!profileData) {
+    throw new Error(`profile configuration is missing for type: ${profileType}`);
+  }
+
+  return {
+    type: profileType,
+    focusKeywords: Array.isArray(profileData.focusKeywords) ? profileData.focusKeywords : [],
+    avoidKeywords: Array.isArray(profileData.avoidKeywords) ? profileData.avoidKeywords : [],
+    preferredAuthors: Array.isArray(profileData.preferredAuthors) ? profileData.preferredAuthors : []
+  };
 }
 
 async function main() {
+  const profile = await loadProfile();
   const { skills, meta } = await fetchCandidateSkills();
   const policy = loadPolicyFromEnv('balanced');
   const installContext = loadInstallPolicyContextFromEnv();
@@ -29,9 +55,9 @@ async function main() {
   const results: RecommendationResult[] = [];
 
   for (const s of skills) {
-    const fitScore = pseudoFit(s.slug);
-    const trendScore = pseudoTrend(s.downloads);
-    const stabilityScore = pseudoStability(s.versions);
+    const fitScore = calculateFitScore(s, profile);
+    const trendScore = calculateTrendScore(s);
+    const stabilityScore = calculateStabilityScore(s);
     const security = securityScore(s);
     const finalScore = calculateFinalScore({
       fit: fitScore,

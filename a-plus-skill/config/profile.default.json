@@ -1,3 +1,20 @@
 {
-  "profile": "developer"
+  "defaultProfile": "developer",
+  "profiles": {
+    "developer": {
+      "focusKeywords": ["dev", "code", "api", "typescript", "debug", "lint"],
+      "avoidKeywords": ["social", "finance", "marketing"],
+      "preferredAuthors": ["openclaw", "core-team"]
+    },
+    "automation": {
+      "focusKeywords": ["automation", "workflow", "scheduler", "pipeline", "integration"],
+      "avoidKeywords": ["game", "theme", "wallpaper"],
+      "preferredAuthors": ["openclaw", "automation-lab"]
+    },
+    "assistant": {
+      "focusKeywords": ["assistant", "chat", "summary", "meeting", "calendar", "email"],
+      "avoidKeywords": ["kernel", "firmware", "driver"],
+      "preferredAuthors": ["openclaw", "assistant-hub"]
+    }
+  }
 }

@@ -1,5 +1,19 @@
 export type Policy = 'strict' | 'balanced' | 'fast';
 
+export type ProfileType = 'developer' | 'automation' | 'assistant';
+
+export type ProfileConfig = {
+  type: ProfileType;
+  focusKeywords: string[];
+  avoidKeywords: string[];
+  preferredAuthors: string[];
+};
+
+export type ProfileRegistry = {
+  defaultProfile: ProfileType;
+  profiles: Record<ProfileType, Omit<ProfileConfig, 'type'>>;
+};
+
 export type SkillMeta = {
   slug: string;
   name: string;
