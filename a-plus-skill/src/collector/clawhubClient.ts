@@ -2,7 +2,7 @@ import type { CollectorResult, SkillMeta } from '../types/index.js';
 
 const DEFAULT_CLAWHUB_SKILLS_URL = 'https://clawhub.ai/skills?nonSuspicious=true';
 const ALLOWED_HOSTS = new Set(['clawhub.ai', 'www.clawhub.ai', 'clawhub.org', 'www.clawhub.org']);
-const MIN_PARSED_SKILLS = 3;
+export const DEFAULT_MIN_PARSED_SKILLS = 3;
 
 type FetchLike = typeof fetch;
 
@@ -49,13 +49,25 @@ function resolveSkillsUrl(): string {
     return DEFAULT_CLAWHUB_SKILLS_URL;
   }
 
-  const hasExpectedPath = parsed.pathname.includes('/skills');
+  const hasExpectedPath = parsed.pathname === '/skills' || parsed.pathname.startsWith('/skills/');
   if (!hasExpectedPath) {
     console.warn(`[collector] Unexpected ClawHub path: ${parsed.pathname}. Falling back to default skills URL.`);
     return DEFAULT_CLAWHUB_SKILLS_URL;
   }
 
   return parsed.toString();
+}
+
+export function resolveMinParsedSkills(): number {
+  const raw = process.env.MIN_PARSED_SKILLS?.trim();
+  if (!raw) return DEFAULT_MIN_PARSED_SKILLS;
+
+  if (!/^[0-9]+$/.test(raw)) return DEFAULT_MIN_PARSED_SKILLS;
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_MIN_PARSED_SKILLS;
+
+  return parsed;
 }
 
 function asNumber(value: unknown): number {
@@ -208,6 +220,7 @@ function fallbackResult(reason: string): CollectorResult {
 
 export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<CollectorResult> {
   const skillsUrl = resolveSkillsUrl();
+  const minParsedSkills = resolveMinParsedSkills();
 
   try {
     const response = await fetcher(skillsUrl, {
@@ -226,9 +239,9 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
     const html = await response.text();
     const parsed = parseSkillsFromHtml(html);
 
-    if (parsed.length < MIN_PARSED_SKILLS) {
+    if (parsed.length < minParsedSkills) {
       const reason = `PARSE_BELOW_THRESHOLD_${parsed.length}`;
-      console.warn(`[collector] ClawHub parse yielded ${parsed.length} skills (<${MIN_PARSED_SKILLS}); falling back.`);
+      console.warn(`[collector] ClawHub parse yielded ${parsed.length} skills (<${minParsedSkills}); falling back.`);
       return fallbackResult(reason);
     }
 

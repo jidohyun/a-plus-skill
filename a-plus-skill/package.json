@@ -11,6 +11,7 @@
     "dev": "node --import tsx src/index.ts",
     "report:send": "node --import tsx src/index.ts",
     "delivery:failures": "node scripts/delivery-failure-summary.mjs",
+    "collector:status": "node --import tsx scripts/collector-status.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

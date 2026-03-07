@@ -96,9 +96,20 @@ npm run typecheck
 npm run build
 ```
 
+## collector 상태 확인
+```bash
+npm run collector:status
+# 예시 출력: mode=live reason=NONE fetchedAt=2026-03-07T05:30:00.000Z
+```
+- `mode=live`면 `reason=NONE`
+- `mode=fallback`면 `reason`에 `fallbackReason` 코드가 출력됩니다.
+
 ## 실데이터 수집 동작
 - `src/collector/clawhubClient.ts`는 기본적으로 `https://clawhub.ai/skills?nonSuspicious=true`를 조회합니다.
-- 필요 시 `CLAWHUB_BASE_URL` 환경변수로 수집 URL을 바꿀 수 있으며, 허용 호스트 allowlist(`clawhub.ai`, `clawhub.org`)를 벗어나면 기본 URL로 되돌립니다.
+- 필요 시 `CLAWHUB_BASE_URL` 환경변수로 수집 URL을 바꿀 수 있으며, 허용 호스트 allowlist(`clawhub.ai`, `clawhub.org`)를 벗어나거나 경로가 `/skills` 계열이 아니면 기본 URL로 되돌립니다.
+- `MIN_PARSED_SKILLS`(기본 `3`)로 최소 파싱 스킬 수 임계치를 조정할 수 있습니다.
+  - 정수 `1` 이상만 유효하며, 잘못된 값은 기본값(`3`)으로 자동 fallback 됩니다.
+  - 권장 범위: `1~10` (너무 낮으면 품질 저하, 너무 높으면 fallback 빈도 증가)
 - 페이지 내 `<script>` JSON(예: `__NEXT_DATA__`)에서 스킬 메타데이터를 찾아 `SkillMeta[]`로 정규화합니다.
 - 수집된 데이터는 그대로 추천 점수 계산과 주간 리포트 출력에 사용됩니다.
 
