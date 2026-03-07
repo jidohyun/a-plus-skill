@@ -107,6 +107,15 @@ function resolveNonceDir(raw?: string): string {
   return raw?.trim() || './data/override-nonces';
 }
 
+function resolvePolicy(raw?: string): Policy {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized === 'strict' || normalized === 'balanced' || normalized === 'fast') {
+    return normalized;
+  }
+
+  return 'balanced';
+}
+
 function ensureNonceDirWritable(dir: string): string {
   const resolvedDir = resolve(dir);
 
@@ -128,7 +137,7 @@ function ensureNonceDirWritable(dir: string): string {
 
 export function validateOverrideSecurityPosture(params?: { topology?: InstallTopology; policy?: Policy }): void {
   const topology = params?.topology ?? resolveTopology(process.env.INSTALL_TOPOLOGY);
-  const policy = params?.policy;
+  const policy = params?.policy ?? resolvePolicy(process.env.INSTALL_POLICY);
   const mode = resolveNonceStoreMode(process.env.INSTALL_OVERRIDE_NONCE_STORE);
 
   if (topology === 'multi-instance') {

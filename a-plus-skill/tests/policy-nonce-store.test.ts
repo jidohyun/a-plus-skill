@@ -122,4 +122,34 @@ describe('override nonce store', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('fails fast for multi-instance topology when INSTALL_POLICY=fast and no params are passed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nonce-posture-fast-env-'));
+
+    try {
+      process.env.INSTALL_TOPOLOGY = 'multi-instance';
+      process.env.INSTALL_OVERRIDE_NONCE_STORE = 'file';
+      process.env.INSTALL_OVERRIDE_NONCE_DIR = dir;
+      process.env.INSTALL_POLICY = 'fast';
+
+      expect(() => validateOverrideSecurityPosture()).toThrow(/does not allow INSTALL_POLICY=fast/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('passes posture validation with INSTALL_POLICY=balanced and no params are passed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nonce-posture-balanced-env-'));
+
+    try {
+      process.env.INSTALL_TOPOLOGY = 'multi-instance';
+      process.env.INSTALL_OVERRIDE_NONCE_STORE = 'file';
+      process.env.INSTALL_OVERRIDE_NONCE_DIR = dir;
+      process.env.INSTALL_POLICY = 'balanced';
+
+      expect(() => validateOverrideSecurityPosture()).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
