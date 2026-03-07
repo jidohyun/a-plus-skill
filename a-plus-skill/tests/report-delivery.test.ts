@@ -1,11 +1,18 @@
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DiscordDmError } from '../src/delivery/discordDm.js';
 import { TelegramSendError } from '../src/delivery/telegram.js';
 import { sendWeeklyReport } from '../src/delivery/reportSender.js';
 
+const deliveryLogPath = resolve(process.cwd(), 'data/report-delivery.log');
+const deliveryLogRotatedPath = `${deliveryLogPath}.1`;
+
 describe('report delivery', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs();
+    await rm(deliveryLogPath, { force: true });
+    await rm(deliveryLogRotatedPath, { force: true });
   });
 
   it('splits long report and sends all chunks for discord-dm', async () => {
@@ -207,7 +214,7 @@ describe('report delivery', () => {
     expect(called).toBe(0);
   });
 
-  it('skips with reason when REPORT_DELIVERY mode is unsupported', async () => {
+  it('skips with unsupported reason when REPORT_DELIVERY mode is unsupported', async () => {
     vi.stubEnv('REPORT_DELIVERY', 'smtp');
 
     const result = await sendWeeklyReport('report', undefined, {
@@ -219,10 +226,10 @@ describe('report delivery', () => {
 
     expect(result.skipped).toBe(true);
     expect(result.mode).toBe('none');
-    expect(result.reason).toContain('unsupported');
+    expect(result.reason).toBe('unsupported REPORT_DELIVERY mode');
   });
 
-  it('skips when REPORT_DELIVERY does not match REPORT_DELIVERY_LOCKED', async () => {
+  it('uses lock_mismatch reason when REPORT_DELIVERY does not match REPORT_DELIVERY_LOCKED', async () => {
     vi.stubEnv('REPORT_DELIVERY', 'telegram');
     vi.stubEnv('REPORT_DELIVERY_LOCKED', 'discord-dm');
 
@@ -235,7 +242,29 @@ describe('report delivery', () => {
     });
 
     expect(result.skipped).toBe(true);
-    expect(result.reason).toContain('unsupported');
+    expect(result.reason).toBe('lock_mismatch');
     expect(called).toBe(0);
+  });
+
+  it('rotates delivery failure log when max bytes threshold is reached', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'smtp');
+    vi.stubEnv('REPORT_DELIVERY_LOG_MAX_BYTES', '64');
+
+    await writeFile(deliveryLogPath, 'x'.repeat(64), 'utf8');
+
+    await sendWeeklyReport('report', undefined, {
+      sender: async () => {
+        throw new Error('should not run');
+      },
+      sleepFn: async () => {}
+    });
+
+    const rotated = await readFile(deliveryLogRotatedPath, 'utf8');
+    const current = await readFile(deliveryLogPath, 'utf8');
+    const currentStat = await stat(deliveryLogPath);
+
+    expect(rotated).toBe('x'.repeat(64));
+    expect(current).toContain('event=unsupported_mode');
+    expect(currentStat.size).toBeGreaterThan(0);
   });
 });

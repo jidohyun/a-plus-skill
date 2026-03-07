@@ -32,7 +32,8 @@ npm run dev
 
 ## 리포트 전송 설정 (Discord DM / Telegram)
 - `REPORT_DELIVERY`: `none | discord-dm | telegram` (기본 `none`)
-- `REPORT_DELIVERY_LOCKED` (선택): `discord-dm` 또는 `telegram`으로 고정. 잠금값과 다르면 전송을 스킵합니다.
+- `REPORT_DELIVERY_LOCKED` (선택): `discord-dm` 또는 `telegram`으로 고정. 잠금값과 다르면 전송을 스킵하며 reason=`lock_mismatch`로 기록합니다.
+- `REPORT_DELIVERY_LOG_MAX_BYTES` (선택, 기본 `1048576`): `data/report-delivery.log` 최대 크기. 초과 시 기존 로그를 `data/report-delivery.log.1`로 로테이션합니다.
 - `REPORT_DELIVERY_FAIL_HARD` (선택, 기본 `true`): 전송 실패 시 프로세스를 실패(exit != 0)로 처리
 - Discord DM
   - `DISCORD_BOT_TOKEN`: Discord Bot 토큰 (`Bot <token>` 인증에 사용)
@@ -69,9 +70,21 @@ REPORT_DELIVERY=telegram npm run report:send
 ```
 
 ## 전송 실패 로그
-- 경로: `data/report-delivery.log`
-- 기록 내용: chunk 번호/시도 횟수/에러 메시지
+- 경로: `data/report-delivery.log` (로테이션: `data/report-delivery.log.1`)
+- 기록 내용: event/chunk 번호/시도 횟수/code/status
+- 주요 reason
+  - `lock_mismatch`: `REPORT_DELIVERY`가 `REPORT_DELIVERY_LOCKED`와 불일치
+  - `unsupported REPORT_DELIVERY mode`: 지원하지 않는 전송 모드
 - 재시도: chunk별 최대 3회 (지수 백오프)
+
+실패 요약 확인:
+```bash
+# 최근 24시간(기본)
+npm run delivery:failures
+
+# 최근 6시간
+npm run delivery:failures -- --hours 6
+```
 
 ## 테스트
 ```bash

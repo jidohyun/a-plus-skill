@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createDiscordDmSender, DiscordDmError } from './discordDm.js';
 import { createTelegramSender, TelegramSendError } from './telegram.js';
@@ -8,6 +8,8 @@ const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 300;
 const MAX_RETRY_AFTER_MS = 60_000;
 const DELIVERY_LOG_PATH = resolve(process.cwd(), 'data/report-delivery.log');
+const DELIVERY_LOG_ROTATED_PATH = `${DELIVERY_LOG_PATH}.1`;
+const DEFAULT_DELIVERY_LOG_MAX_BYTES = 1_048_576;
 const MAX_MESSAGE_LENGTH: Record<Exclude<ReportDeliveryMode, 'none'>, number> = {
   'discord-dm': 1900,
   telegram: 4000
@@ -107,9 +109,30 @@ function sanitizeError(error: unknown): ErrorInfo {
   return { code: 'UNKNOWN_ERROR' };
 }
 
+function getDeliveryLogMaxBytes(): number {
+  const raw = process.env.REPORT_DELIVERY_LOG_MAX_BYTES;
+  if (!raw) return DEFAULT_DELIVERY_LOG_MAX_BYTES;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_DELIVERY_LOG_MAX_BYTES;
+  return parsed;
+}
+
+async function rotateDeliveryLogIfNeeded(maxBytes: number): Promise<void> {
+  try {
+    const info = await stat(DELIVERY_LOG_PATH);
+    if (info.size < maxBytes) return;
+
+    await unlink(DELIVERY_LOG_ROTATED_PATH).catch(() => {});
+    await rename(DELIVERY_LOG_PATH, DELIVERY_LOG_ROTATED_PATH);
+  } catch {
+    // ignore stat/rotate errors
+  }
+}
+
 async function logFailure(message: string): Promise<void> {
   try {
     await mkdir(dirname(DELIVERY_LOG_PATH), { recursive: true });
+    await rotateDeliveryLogIfNeeded(getDeliveryLogMaxBytes());
     await appendFile(DELIVERY_LOG_PATH, `${new Date().toISOString()} ${message}\n`, 'utf8');
   } catch {
     // do not fail delivery flow due to logging failure
@@ -144,18 +167,21 @@ function sanitizeMode(raw: string): string {
   return raw.replace(/[^a-z0-9_-]/gi, '_').slice(0, 32) || 'unknown';
 }
 
-function enforceModeLock(resolved: ReportDeliveryMode | 'unsupported', rawMode: string): ReportDeliveryMode | 'unsupported' {
+function enforceModeLock(
+  resolved: ReportDeliveryMode | 'unsupported',
+  rawMode: string
+): { mode: ReportDeliveryMode | 'unsupported'; lockMismatch: boolean } {
   const locked = (process.env.REPORT_DELIVERY_LOCKED ?? '').trim().toLowerCase();
-  if (!locked) return resolved;
+  if (!locked) return { mode: resolved, lockMismatch: false };
 
   const lockedMode = resolveMode(locked);
-  if (lockedMode === 'unsupported') return 'unsupported';
+  if (lockedMode === 'unsupported') return { mode: 'unsupported', lockMismatch: false };
 
   if (rawMode !== lockedMode) {
-    return 'unsupported';
+    return { mode: 'unsupported', lockMismatch: true };
   }
 
-  return resolved;
+  return { mode: resolved, lockMismatch: false };
 }
 
 function createSender(mode: Exclude<ReportDeliveryMode, 'none'>, deps?: { sender?: SenderFn }): SenderFn {
@@ -170,13 +196,19 @@ export async function sendWeeklyReport(
   deps?: { sender?: SenderFn; sleepFn?: SleepFn }
 ): Promise<ReportDeliveryResult> {
   const rawMode = (process.env.REPORT_DELIVERY ?? 'none').trim().toLowerCase();
-  const mode = enforceModeLock(resolveMode(rawMode), rawMode);
+  const { mode, lockMismatch } = enforceModeLock(resolveMode(rawMode), rawMode);
 
   if (mode === 'none') {
     return { skipped: true, mode: 'none', chunksAttempted: 0, chunksSent: 0 };
   }
 
   if (mode === 'unsupported') {
+    if (lockMismatch) {
+      const reason = 'lock_mismatch';
+      await logFailure(`event=lock_mismatch mode=${sanitizeMode(rawMode)}`);
+      return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
+    }
+
     const reason = 'unsupported REPORT_DELIVERY mode';
     await logFailure(`event=unsupported_mode mode=${sanitizeMode(rawMode)}`);
     return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };

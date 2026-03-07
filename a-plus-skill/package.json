@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx src/index.ts",
     "report:send": "node --import tsx src/index.ts",
+    "delivery:failures": "node scripts/delivery-failure-summary.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
