@@ -22,6 +22,10 @@ type ErrorInfo = {
   retryAfterMs?: number;
 };
 
+function sanitizeCode(code: string): string {
+  return code.replace(/[^A-Z0-9_\-]/gi, '_').slice(0, 64) || 'UNKNOWN';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
@@ -130,6 +134,24 @@ function resolveMode(raw: string): ReportDeliveryMode | 'unsupported' {
   return 'unsupported';
 }
 
+function sanitizeMode(raw: string): string {
+  return raw.replace(/[^a-z0-9_-]/gi, '_').slice(0, 32) || 'unknown';
+}
+
+function enforceModeLock(resolved: ReportDeliveryMode | 'unsupported', rawMode: string): ReportDeliveryMode | 'unsupported' {
+  const locked = (process.env.REPORT_DELIVERY_LOCKED ?? '').trim().toLowerCase();
+  if (!locked) return resolved;
+
+  const lockedMode = resolveMode(locked);
+  if (lockedMode === 'unsupported') return 'unsupported';
+
+  if (rawMode !== lockedMode) {
+    return 'unsupported';
+  }
+
+  return resolved;
+}
+
 function createSender(mode: Exclude<ReportDeliveryMode, 'none'>, deps?: { sender?: SenderFn }): SenderFn {
   if (deps?.sender) return deps.sender;
   if (mode === 'discord-dm') return createDiscordDmSender();
@@ -142,7 +164,7 @@ export async function sendWeeklyReport(
   deps?: { sender?: SenderFn; sleepFn?: SleepFn }
 ): Promise<ReportDeliveryResult> {
   const rawMode = (process.env.REPORT_DELIVERY ?? 'none').trim().toLowerCase();
-  const mode = resolveMode(rawMode);
+  const mode = enforceModeLock(resolveMode(rawMode), rawMode);
 
   if (mode === 'none') {
     return { skipped: true, mode: 'none', chunksAttempted: 0, chunksSent: 0 };
@@ -150,7 +172,7 @@ export async function sendWeeklyReport(
 
   if (mode === 'unsupported') {
     const reason = 'unsupported REPORT_DELIVERY mode';
-    await logFailure(`event=unsupported_mode mode=${rawMode}`);
+    await logFailure(`event=unsupported_mode mode=${sanitizeMode(rawMode)}`);
     return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
   }
 
@@ -175,8 +197,9 @@ export async function sendWeeklyReport(
         break;
       } catch (error) {
         const info = sanitizeError(error);
+        const safeCode = sanitizeCode(info.code);
         await logFailure(
-          `event=delivery_failed mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${info.code}${
+          `event=delivery_failed mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${safeCode}${
             info.status ? ` status=${info.status}` : ''
           }${info.retryAfterMs ? ` retry_after_ms=${info.retryAfterMs}` : ''}`
         );

@@ -205,4 +205,21 @@ describe('report delivery', () => {
     expect(result.mode).toBe('none');
     expect(result.reason).toContain('unsupported');
   });
+
+  it('skips when REPORT_DELIVERY does not match REPORT_DELIVERY_LOCKED', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'telegram');
+    vi.stubEnv('REPORT_DELIVERY_LOCKED', 'discord-dm');
+
+    let called = 0;
+    const result = await sendWeeklyReport('report', undefined, {
+      sender: async () => {
+        called += 1;
+      },
+      sleepFn: async () => {}
+    });
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toContain('unsupported');
+    expect(called).toBe(0);
+  });
 });

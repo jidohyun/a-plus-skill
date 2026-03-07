@@ -32,6 +32,7 @@ npm run dev
 
 ## 리포트 전송 설정 (Discord DM / Telegram)
 - `REPORT_DELIVERY`: `none | discord-dm | telegram` (기본 `none`)
+- `REPORT_DELIVERY_LOCKED` (선택): `discord-dm` 또는 `telegram`으로 고정. 잠금값과 다르면 전송을 스킵합니다.
 - Discord DM
   - `DISCORD_BOT_TOKEN`: Discord Bot 토큰 (`Bot <token>` 인증에 사용)
   - `DISCORD_DM_USER_ID`: DM 수신 대상 Discord user id
@@ -55,6 +56,7 @@ REPORT_DELIVERY=telegram npm run report:send
 
 > 보안 주의: 토큰을 커맨드라인 인라인으로 넣지 마세요. shell history/process list에 남을 수 있습니다.
 > Telegram은 Bot API 제한(429)을 반환할 수 있으며, 본 구현은 `retry_after`를 파싱해 chunk 전송 재시도 지연(ms)으로 매핑합니다.
+> Telegram Bot API 특성상 토큰이 요청 URL 경로에 포함되므로, 프록시/APM/access log에 URL 원문을 남기지 않도록 운영 설정을 권장합니다.
 
 ## cron 예시
 ```cron
