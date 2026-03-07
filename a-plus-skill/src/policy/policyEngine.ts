@@ -59,10 +59,6 @@ function isSimpleRepeatedPattern(value: string): boolean {
   return false;
 }
 
-function isLegacyStrongToken(token: string): boolean {
-  return token.length >= 20;
-}
-
 type ParsedOverrideToken = {
   token: string;
   iat: number;
@@ -145,12 +141,6 @@ type OverrideValidationResult = {
 function validateOverrideToken(v?: string): OverrideValidationResult {
   const token = v?.trim() ?? '';
   if (!token) return { valid: false, parsed: null };
-
-  const isProduction = process.env.NODE_ENV === 'production';
-  const allowLegacy = !isProduction && process.env.INSTALL_OVERRIDE_ALLOW_LEGACY === 'true';
-  if (allowLegacy && isLegacyStrongToken(token)) {
-    return { valid: true, parsed: null };
-  }
 
   const parsed = parseSignedOverrideToken(token);
   if (!parsed) return { valid: false, parsed: null };

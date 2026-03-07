@@ -2,9 +2,10 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fetchCandidateSkills } from './collector/clawhubClient.js';
-import { loadInstallPolicyContextFromEnv, loadPolicyFromEnv } from './install/confirm.js';
+import { loadInstallPolicyContextFromEnv, loadInstallTopologyFromEnv, loadPolicyFromEnv } from './install/confirm.js';
 import { runInstall } from './install/openclawInstaller.js';
 import { decide, planInstallAction } from './policy/policyEngine.js';
+import { validateOverrideSecurityPosture } from './policy/overrideNonceStore.js';
 import { buildReasons } from './recommender/explain.js';
 import {
   calculateFinalScore,
@@ -37,6 +38,9 @@ async function main() {
   const profile = await loadProfile();
   const { skills, meta } = await fetchCandidateSkills();
   const policy = loadPolicyFromEnv('balanced');
+  const topology = loadInstallTopologyFromEnv('single-instance');
+  validateOverrideSecurityPosture({ topology, policy });
+
   const installContext = loadInstallPolicyContextFromEnv();
 
   const results: RecommendationResult[] = [];

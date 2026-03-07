@@ -1,5 +1,7 @@
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { constants as fsConstants } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { InstallTopology, Policy } from '../types/index.js';
 
 export interface OverrideNonceStore {
   consume(nonce: string, exp: number, now: number): boolean;
@@ -36,8 +38,7 @@ export class FileNonceStore implements OverrideNonceStore {
   private readonly dir: string;
 
   constructor(dir = './data/override-nonces') {
-    this.dir = resolve(dir);
-    mkdirSync(this.dir, { recursive: true });
+    this.dir = ensureNonceDirWritable(dir);
   }
 
   consume(nonce: string, exp: number, now: number): boolean {
@@ -89,11 +90,68 @@ export class FileNonceStore implements OverrideNonceStore {
 
 let storeSingleton: OverrideNonceStore | null = null;
 
+function resolveTopology(raw?: string): InstallTopology {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized === 'local-dev' || normalized === 'single-instance' || normalized === 'multi-instance') {
+    return normalized;
+  }
+
+  return 'single-instance';
+}
+
+function resolveNonceStoreMode(raw?: string): 'memory' | 'file' {
+  return raw?.trim().toLowerCase() === 'file' ? 'file' : 'memory';
+}
+
+function resolveNonceDir(raw?: string): string {
+  return raw?.trim() || './data/override-nonces';
+}
+
+function ensureNonceDirWritable(dir: string): string {
+  const resolvedDir = resolve(dir);
+
+  try {
+    mkdirSync(resolvedDir, { recursive: true });
+    accessSync(resolvedDir, fsConstants.R_OK | fsConstants.W_OK);
+
+    const probePath = join(resolvedDir, '.nonce-store-write-test');
+    writeFileSync(probePath, String(Date.now()), { flag: 'w' });
+    unlinkSync(probePath);
+  } catch (error) {
+    throw new Error(
+      `[security] override nonce directory must be writable: ${resolvedDir} (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+
+  return resolvedDir;
+}
+
+export function validateOverrideSecurityPosture(params?: { topology?: InstallTopology; policy?: Policy }): void {
+  const topology = params?.topology ?? resolveTopology(process.env.INSTALL_TOPOLOGY);
+  const policy = params?.policy;
+  const mode = resolveNonceStoreMode(process.env.INSTALL_OVERRIDE_NONCE_STORE);
+
+  if (topology === 'multi-instance') {
+    if (mode !== 'file') {
+      throw new Error(
+        '[security] INSTALL_TOPOLOGY=multi-instance requires INSTALL_OVERRIDE_NONCE_STORE=file to enforce replay protection across instances'
+      );
+    }
+
+    const dir = resolveNonceDir(process.env.INSTALL_OVERRIDE_NONCE_DIR);
+    ensureNonceDirWritable(dir);
+
+    if (policy === 'fast') {
+      throw new Error('[security] INSTALL_TOPOLOGY=multi-instance does not allow INSTALL_POLICY=fast');
+    }
+  }
+}
+
 export function createOverrideNonceStoreFromEnv(): OverrideNonceStore {
-  const mode = process.env.INSTALL_OVERRIDE_NONCE_STORE?.trim().toLowerCase() ?? 'memory';
+  const mode = resolveNonceStoreMode(process.env.INSTALL_OVERRIDE_NONCE_STORE);
 
   if (mode === 'file') {
-    const dir = process.env.INSTALL_OVERRIDE_NONCE_DIR?.trim() || './data/override-nonces';
+    const dir = resolveNonceDir(process.env.INSTALL_OVERRIDE_NONCE_DIR);
     return new FileNonceStore(dir);
   }
 

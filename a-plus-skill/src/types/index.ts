@@ -1,5 +1,7 @@
 export type Policy = 'strict' | 'balanced' | 'fast';
 
+export type InstallTopology = 'local-dev' | 'single-instance' | 'multi-instance';
+
 export type ProfileType = 'developer' | 'automation' | 'assistant';
 
 export type ProfileConfig = {

@@ -135,21 +135,36 @@ npm run collector:status -- --strict
   - `strict`: hold는 **유효한 override token** + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
   - `balanced`: hold는 valid token+reason+confirm 필요, block은 valid token 2개(`INSTALL_OVERRIDE_TOKEN`, `INSTALL_OVERRIDE_STRONG_TOKEN`) + reason + confirm 필요
   - `fast`: hold/block 모두 valid token + reason + confirm 필요
+- 토폴로지 가드레일:
+  - `INSTALL_TOPOLOGY` 지원값: `local-dev | single-instance | multi-instance` (기본 `single-instance`)
+  - `INSTALL_TOPOLOGY=multi-instance`에서는 startup 시 보안 posture를 강제 검증(fail-fast)
+  - `multi-instance`에서 `INSTALL_POLICY=fast`는 **허용되지 않음**(보안 우선 fail-fast)
 - 기본값은 안전 모드: 확인/우회가 없으면 hold/block 설치는 실행되지 않습니다.
 - degraded 상태에서는 정책과 무관하게 설치는 항상 `skip-install`입니다.
 
 ### 설치 관련 환경변수
 - `INSTALL_POLICY`: `strict | balanced | fast` (기본 `balanced`)
+- `INSTALL_TOPOLOGY`: `local-dev | single-instance | multi-instance` (기본 `single-instance`)
 - `INSTALL_CONFIRM`: `true/1/yes`일 때만 확인 완료로 간주
 - `INSTALL_OVERRIDE_TOKEN`: hold/block 우회 토큰
 - `INSTALL_OVERRIDE_STRONG_TOKEN`: balanced block 우회용 추가 토큰
 - `INSTALL_OVERRIDE_REASON`: balanced block 우회 사유
 - `INSTALL_OVERRIDE_MAX_TTL_SEC`: override token 최대 TTL(초), 기본 `900` (hard cap `900`)
 - `INSTALL_OVERRIDE_CLOCK_SKEW_SEC`: clock skew 허용 오차(초), 기본 `60` (hard cap `120`)
-- `INSTALL_OVERRIDE_ALLOW_LEGACY`: `true`일 때만 기존 20자+ 레거시 토큰 임시 허용(기본 `false`, **non-production에서만 동작**, `NODE_ENV=production`에서는 항상 차단)
 - `INSTALL_OVERRIDE_SIGNING_SECRET`: override token 서명 검증용 HMAC secret (**서명 토큰 사용 시 필수**)
 - `INSTALL_OVERRIDE_NONCE_STORE`: nonce replay 방지 저장소 모드 `memory | file` (기본 `memory`)
 - `INSTALL_OVERRIDE_NONCE_DIR`: `INSTALL_OVERRIDE_NONCE_STORE=file`일 때 nonce 파일 경로 (기본 `./data/override-nonces`)
+- startup fail-fast 보안 검증:
+  - `INSTALL_TOPOLOGY=multi-instance`면 `INSTALL_OVERRIDE_NONCE_STORE=file` **강제**
+  - `INSTALL_TOPOLOGY=multi-instance`면 `INSTALL_OVERRIDE_NONCE_DIR`가 유효/쓰기 가능해야 함
+  - `INSTALL_TOPOLOGY=multi-instance` + `INSTALL_POLICY=fast`는 즉시 실패
+
+#### multi-instance 운영 체크리스트
+- 모든 인스턴스에서 `INSTALL_TOPOLOGY=multi-instance` 설정
+- 모든 인스턴스에서 `INSTALL_OVERRIDE_NONCE_STORE=file` 설정
+- 모든 인스턴스가 **동일한 공유 nonce 디렉터리**(`INSTALL_OVERRIDE_NONCE_DIR`)를 읽기/쓰기 가능하게 마운트
+- 앱 시작 시 fail-fast가 발생하면 install 루프 전에 설정/권한 문제를 먼저 해소
+
 - `OPENCLAW_INSTALL_COMMAND`: 설치 커맨드 베이스 (기본 `openclaw skill install`)
   - 보안상 첫 토큰은 `openclaw`만 허용되며, 서브커맨드는 반드시 `skill install`로 시작해야 합니다.
 
@@ -168,7 +183,7 @@ npm run collector:status -- --strict
   - 서명 불일치 또는 누락 시 거부
   - nonce replay 방지: 이미 사용된 nonce 재사용 거부(`memory` 또는 `file` store, exp 기반 GC). `file` 모드는 프로세스 재시작/다중 프로세스 경계에서도 재사용 차단
   - balanced의 block 우회는 `INSTALL_OVERRIDE_TOKEN`과 `INSTALL_OVERRIDE_STRONG_TOKEN`이 **서로 다른 토큰/nonce**여야 함
-- 레거시 전환: `INSTALL_OVERRIDE_ALLOW_LEGACY=true`는 마이그레이션 기간의 임시 호환 모드이며, 안정화 후 제거 권장
+- 레거시(길이 기반) override 토큰 경로는 완전 제거되었습니다. 환경변수로도 재활성화할 수 없습니다.
 
 ## 산출 예시
 - top 추천 리스트 + 보안 상태(`recommend/caution/hold/block`)

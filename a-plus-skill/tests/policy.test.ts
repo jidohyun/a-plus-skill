@@ -271,40 +271,29 @@ describe('policy', () => {
     expect(plan.action).toBe('override-install');
   });
 
-  it('allows legacy length-based token in non-production when explicit flag is enabled', () => {
+  it('always rejects legacy length-based token regardless of env', () => {
     const legacyToken = '12345678901234567890';
+
     process.env.NODE_ENV = 'development';
-
-    const disabled = planInstallAction('fast', 'hold', {
-      confirmed: true,
-      overrideToken: legacyToken,
-      overrideReason: 'operator approved'
-    });
-    expect(disabled.canInstall).toBe(false);
-
     process.env.INSTALL_OVERRIDE_ALLOW_LEGACY = 'true';
-    const enabled = planInstallAction('fast', 'hold', {
+    const devAttempt = planInstallAction('fast', 'hold', {
       confirmed: true,
       overrideToken: legacyToken,
       overrideReason: 'operator approved'
     });
-    expect(enabled.canInstall).toBe(true);
-    expect(enabled.action).toBe('override-install');
-  });
 
-  it('blocks legacy override token in production even when explicit flag is enabled', () => {
-    const legacyToken = '12345678901234567890';
     process.env.NODE_ENV = 'production';
     process.env.INSTALL_OVERRIDE_ALLOW_LEGACY = 'true';
-
-    const blocked = planInstallAction('fast', 'hold', {
+    const prodAttempt = planInstallAction('fast', 'hold', {
       confirmed: true,
       overrideToken: legacyToken,
       overrideReason: 'operator approved'
     });
 
-    expect(blocked.canInstall).toBe(false);
-    expect(blocked.action).toBe('confirm-install');
+    expect(devAttempt.canInstall).toBe(false);
+    expect(devAttempt.action).toBe('confirm-install');
+    expect(prodAttempt.canInstall).toBe(false);
+    expect(prodAttempt.action).toBe('confirm-install');
   });
 
   it('enforces hard caps for ttl and skew even with oversized env values', () => {

@@ -1,4 +1,4 @@
-import type { InstallPolicyContext, Policy } from '../types/index.js';
+import type { InstallPolicyContext, InstallTopology, Policy } from '../types/index.js';
 
 function envBool(name: string): boolean {
   const value = process.env[name]?.trim().toLowerCase();
@@ -9,6 +9,12 @@ export function loadPolicyFromEnv(defaultPolicy: Policy = 'balanced'): Policy {
   const raw = process.env.INSTALL_POLICY?.trim();
   if (raw === 'strict' || raw === 'balanced' || raw === 'fast') return raw;
   return defaultPolicy;
+}
+
+export function loadInstallTopologyFromEnv(defaultTopology: InstallTopology = 'single-instance'): InstallTopology {
+  const raw = process.env.INSTALL_TOPOLOGY?.trim();
+  if (raw === 'local-dev' || raw === 'single-instance' || raw === 'multi-instance') return raw;
+  return defaultTopology;
 }
 
 export function loadInstallPolicyContextFromEnv(): InstallPolicyContext {

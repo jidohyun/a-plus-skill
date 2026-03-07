@@ -1,13 +1,22 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   FileNonceStore,
   MemoryNonceStore,
   createOverrideNonceStoreFromEnv,
+  validateOverrideSecurityPosture,
   __resetOverrideNonceStoreForTests
 } from '../src/policy/overrideNonceStore.js';
+
+afterEach(() => {
+  delete process.env.INSTALL_TOPOLOGY;
+  delete process.env.INSTALL_POLICY;
+  delete process.env.INSTALL_OVERRIDE_NONCE_STORE;
+  delete process.env.INSTALL_OVERRIDE_NONCE_DIR;
+  __resetOverrideNonceStoreForTests();
+});
 
 describe('override nonce store', () => {
   it('memory store consumes nonce only once', () => {
@@ -59,9 +68,57 @@ describe('override nonce store', () => {
       const store = createOverrideNonceStoreFromEnv();
       expect(store).toBeInstanceOf(FileNonceStore);
     } finally {
-      delete process.env.INSTALL_OVERRIDE_NONCE_STORE;
-      delete process.env.INSTALL_OVERRIDE_NONCE_DIR;
-      __resetOverrideNonceStoreForTests();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails fast for multi-instance topology when memory nonce store is configured', () => {
+    process.env.INSTALL_TOPOLOGY = 'multi-instance';
+    process.env.INSTALL_OVERRIDE_NONCE_STORE = 'memory';
+
+    expect(() => validateOverrideSecurityPosture()).toThrow(/requires INSTALL_OVERRIDE_NONCE_STORE=file/i);
+  });
+
+  it('passes posture validation for multi-instance + file store with valid dir', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nonce-posture-valid-'));
+
+    try {
+      process.env.INSTALL_TOPOLOGY = 'multi-instance';
+      process.env.INSTALL_OVERRIDE_NONCE_STORE = 'file';
+      process.env.INSTALL_OVERRIDE_NONCE_DIR = dir;
+
+      expect(() => validateOverrideSecurityPosture()).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails fast when multi-instance nonce dir is not writable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nonce-posture-ro-'));
+
+    try {
+      process.env.INSTALL_TOPOLOGY = 'multi-instance';
+      process.env.INSTALL_OVERRIDE_NONCE_STORE = 'file';
+      process.env.INSTALL_OVERRIDE_NONCE_DIR = dir;
+
+      chmodSync(dir, 0o555);
+      expect(() => validateOverrideSecurityPosture()).toThrow(/must be writable/i);
+    } finally {
+      chmodSync(dir, 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails fast for multi-instance topology when fast policy is configured', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nonce-posture-fast-'));
+
+    try {
+      process.env.INSTALL_TOPOLOGY = 'multi-instance';
+      process.env.INSTALL_OVERRIDE_NONCE_STORE = 'file';
+      process.env.INSTALL_OVERRIDE_NONCE_DIR = dir;
+
+      expect(() => validateOverrideSecurityPosture({ policy: 'fast' })).toThrow(/does not allow INSTALL_POLICY=fast/i);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
