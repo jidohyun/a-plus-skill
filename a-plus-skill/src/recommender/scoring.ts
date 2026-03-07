@@ -1,6 +1,7 @@
 import type { ProfileConfig, SkillMeta } from '../types/index.js';
 
 const clampScore = (value: number) => Math.max(0, Math.min(100, value));
+const roundScore = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
 
 const toFiniteNumber = (value: number | undefined, fallback: number) =>
   Number.isFinite(value) ? (value as number) : fallback;
@@ -38,7 +39,7 @@ export function calculateTrendScore(skill: SkillMeta): number {
   return clampScore(downloadsSignal * 0.55 + starsSignal * 0.3 + installSignal * 0.15);
 }
 
-export function calculateStabilityScore(skill: SkillMeta): number {
+export function calculateStabilityScore(skill: SkillMeta, nowMs: number = Date.now()): number {
   const versions = Math.max(0, toFiniteNumber(skill.versions, 0));
   const updatedAt = Date.parse(skill.updatedAt);
 
@@ -46,13 +47,12 @@ export function calculateStabilityScore(skill: SkillMeta): number {
 
   let recencySignal = 50;
   if (Number.isFinite(updatedAt)) {
-    const now = Date.now();
-    const ageMs = Math.max(0, now - updatedAt);
+    const ageMs = Math.max(0, nowMs - updatedAt);
     const ageDays = ageMs / (1000 * 60 * 60 * 24);
     recencySignal = clampScore(100 * Math.exp(-ageDays / 365));
   }
 
-  return clampScore(versionsSignal * 0.6 + recencySignal * 0.4);
+  return roundScore(clampScore(versionsSignal * 0.6 + recencySignal * 0.4));
 }
 
 export function calculateFinalScore(input: {

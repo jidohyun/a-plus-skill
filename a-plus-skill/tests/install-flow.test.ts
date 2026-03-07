@@ -1,11 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { createHmac } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runInstall } from '../src/install/openclawInstaller.js';
-import { planInstallAction } from '../src/policy/policyEngine.js';
+import { __resetOverrideNonceCacheForTests, planInstallAction } from '../src/policy/policyEngine.js';
+
+const TEST_SIGNING_SECRET = 'test-signing-secret';
 
 function makeCurrentOverrideToken(): string {
   const now = Math.floor(Date.now() / 1000);
-  return `ovr1.${now - 10}.${now + 120}.AbCdEfGhIjKlMnOpQrStUvWX`;
+  const nonce = 'AbCdEfGhIjKlMnOpQrStUvWX';
+  const iat = now - 10;
+  const exp = now + 120;
+  const payload = `${iat}.${exp}.${nonce}`;
+  const sig = createHmac('sha256', TEST_SIGNING_SECRET).update(payload).digest('base64url');
+  return `ovr1.${iat}.${exp}.${nonce}.${sig}`;
 }
+
+beforeEach(() => {
+  __resetOverrideNonceCacheForTests();
+  process.env.INSTALL_OVERRIDE_SIGNING_SECRET = TEST_SIGNING_SECRET;
+});
+
+afterEach(() => {
+  __resetOverrideNonceCacheForTests();
+  delete process.env.INSTALL_OVERRIDE_SIGNING_SECRET;
+});
 
 describe('install flow', () => {
   it('does not run installer when hold has no override', async () => {

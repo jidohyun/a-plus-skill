@@ -146,19 +146,27 @@ npm run collector:status -- --strict
 - `INSTALL_OVERRIDE_REASON`: balanced block 우회 사유
 - `INSTALL_OVERRIDE_MAX_TTL_SEC`: override token 최대 TTL(초), 기본 `900`
 - `INSTALL_OVERRIDE_CLOCK_SKEW_SEC`: clock skew 허용 오차(초), 기본 `60`
-- `INSTALL_OVERRIDE_ALLOW_LEGACY`: `true`일 때만 기존 20자+ 레거시 토큰 임시 허용(기본 `false`)
+- `INSTALL_OVERRIDE_ALLOW_LEGACY`: `true`일 때만 기존 20자+ 레거시 토큰 임시 허용(기본 `false`, **임시 호환 용도**)
+- `INSTALL_OVERRIDE_SIGNING_SECRET`: override token 서명 검증용 HMAC secret (**서명 토큰 사용 시 필수**)
 - `OPENCLAW_INSTALL_COMMAND`: 설치 커맨드 베이스 (기본 `openclaw skill install`)
   - 보안상 첫 토큰은 `openclaw`만 허용되며, 서브커맨드는 반드시 `skill install`로 시작해야 합니다.
 
 #### Override token 형식 (`ovr1`)
-- 포맷: `ovr1.<iat>.<exp>.<nonce>`
+- 포맷: `ovr1.<iat>.<exp>.<nonce>.<sig>`
 - `iat`, `exp`: 10자리 unix seconds
+- `sig` 계산:
+  - payload: ``${iat}.${exp}.${nonce}``
+  - algorithm: `HMAC-SHA256` (`base64url`)
+  - key: `INSTALL_OVERRIDE_SIGNING_SECRET`
 - 검증 규칙:
   - `exp > iat`
   - `exp - iat <= INSTALL_OVERRIDE_MAX_TTL_SEC`
   - 현재 시각(`now`)이 `[iat - INSTALL_OVERRIDE_CLOCK_SKEW_SEC, exp + INSTALL_OVERRIDE_CLOCK_SKEW_SEC]` 범위 내
   - `nonce`는 길이 `22` 이상, unique char `10` 이상, 단순 반복 패턴(예: `aaaa...`, `abcdabcd...`) 거부
-- 레거시 전환: 마이그레이션 기간에만 `INSTALL_OVERRIDE_ALLOW_LEGACY=true`를 사용하고, 안정화 후 제거 권장
+  - 서명 불일치 또는 누락 시 거부
+  - nonce replay 방지: 이미 사용된 nonce 재사용 거부(프로세스 메모리 캐시, exp 기반 GC)
+  - balanced의 block 우회는 `INSTALL_OVERRIDE_TOKEN`과 `INSTALL_OVERRIDE_STRONG_TOKEN`이 **서로 다른 토큰/nonce**여야 함
+- 레거시 전환: `INSTALL_OVERRIDE_ALLOW_LEGACY=true`는 마이그레이션 기간의 임시 호환 모드이며, 안정화 후 제거 권장
 
 ## 산출 예시
 - top 추천 리스트 + 보안 상태(`recommend/caution/hold/block`)

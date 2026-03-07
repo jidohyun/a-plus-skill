@@ -1,29 +1,47 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { decide, planInstallAction } from '../src/policy/policyEngine.js';
+import { createHmac } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { __resetOverrideNonceCacheForTests, decide, planInstallAction } from '../src/policy/policyEngine.js';
+
+const TEST_SIGNING_SECRET = 'test-signing-secret';
+
+function signOverrideToken(iat: number, exp: number, nonce: string, secret = TEST_SIGNING_SECRET): string {
+  const payload = `${iat}.${exp}.${nonce}`;
+  return createHmac('sha256', secret).update(payload).digest('base64url');
+}
 
 function makeOverrideToken({
   iat,
   exp,
-  nonce = 'AbCdEfGhIjKlMnOpQrStUvWX'
+  nonce = 'AbCdEfGhIjKlMnOpQrStUvWX',
+  sig
 }: {
   iat: number;
   exp: number;
   nonce?: string;
+  sig?: string;
 }): string {
-  return `ovr1.${iat}.${exp}.${nonce}`;
+  const resolvedSig = sig ?? signOverrideToken(iat, exp, nonce);
+  return `ovr1.${iat}.${exp}.${nonce}.${resolvedSig}`;
 }
 
-function makeCurrentOverrideToken(overrides: { iatOffset?: number; expOffset?: number; nonce?: string } = {}): string {
+function makeCurrentOverrideToken(overrides: { iatOffset?: number; expOffset?: number; nonce?: string; sig?: string } = {}): string {
   const now = Math.floor(Date.now() / 1000);
   const iat = now + (overrides.iatOffset ?? -10);
   const exp = now + (overrides.expOffset ?? 120);
-  return makeOverrideToken({ iat, exp, nonce: overrides.nonce });
+  return makeOverrideToken({ iat, exp, nonce: overrides.nonce, sig: overrides.sig });
 }
 
+beforeEach(() => {
+  __resetOverrideNonceCacheForTests();
+  process.env.INSTALL_OVERRIDE_SIGNING_SECRET = TEST_SIGNING_SECRET;
+});
+
 afterEach(() => {
+  __resetOverrideNonceCacheForTests();
   delete process.env.INSTALL_OVERRIDE_MAX_TTL_SEC;
   delete process.env.INSTALL_OVERRIDE_CLOCK_SKEW_SEC;
   delete process.env.INSTALL_OVERRIDE_ALLOW_LEGACY;
+  delete process.env.INSTALL_OVERRIDE_SIGNING_SECRET;
 });
 
 describe('policy', () => {
@@ -117,6 +135,54 @@ describe('policy', () => {
     expect(plan.canInstall).toBe(false);
   });
 
+  it('rejects missing signature token', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const tokenWithoutSig = `ovr1.${now - 10}.${now + 120}.AbCdEfGhIjKlMnOpQrStUvWX`;
+
+    const plan = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: tokenWithoutSig,
+      overrideReason: 'operator approved'
+    });
+    expect(plan.canInstall).toBe(false);
+  });
+
+  it('rejects bad signature token', () => {
+    const plan = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken({ sig: 'invalidsig' }),
+      overrideReason: 'operator approved'
+    });
+    expect(plan.canInstall).toBe(false);
+  });
+
+  it('accepts valid signature token', () => {
+    const plan = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken(),
+      overrideReason: 'operator approved'
+    });
+    expect(plan.canInstall).toBe(true);
+  });
+
+  it('rejects replay when identical token is reused', () => {
+    const token = makeCurrentOverrideToken();
+
+    const first = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: token,
+      overrideReason: 'operator approved'
+    });
+    expect(first.canInstall).toBe(true);
+
+    const second = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: token,
+      overrideReason: 'operator approved'
+    });
+    expect(second.canInstall).toBe(false);
+  });
+
   it('rejects token when ttl exceeds max', () => {
     process.env.INSTALL_OVERRIDE_MAX_TTL_SEC = '900';
     const now = Math.floor(Date.now() / 1000);
@@ -175,6 +241,31 @@ describe('policy', () => {
       overrideReason: 'operator approved'
     });
     expect(repeatedPatternPlan.canInstall).toBe(false);
+  });
+
+  it('rejects balanced block override when both tokens are identical', () => {
+    const token = makeCurrentOverrideToken();
+    const plan = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      overrideToken: token,
+      strongOverrideToken: token,
+      overrideReason: 'business critical'
+    });
+
+    expect(plan.canInstall).toBe(false);
+    expect(plan.action).toBe('confirm-install');
+  });
+
+  it('allows balanced block override with distinct valid tokens', () => {
+    const plan = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken({ nonce: 'AbCdEfGhIjKlMnOpQrStUvWX' }),
+      strongOverrideToken: makeCurrentOverrideToken({ nonce: 'ZyXwVuTsRqPoNmLkJiHgFeDc' }),
+      overrideReason: 'business critical'
+    });
+
+    expect(plan.canInstall).toBe(true);
+    expect(plan.action).toBe('override-install');
   });
 
   it('allows legacy length-based token only when explicit flag is enabled', () => {

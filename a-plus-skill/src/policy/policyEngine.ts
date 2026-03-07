@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { InstallPlan, InstallPolicyContext, Policy, RecommendationResult } from '../types/index.js';
 
 const DECISION_HYSTERESIS_BAND = 1;
@@ -28,10 +29,6 @@ export function decide(policy: Policy, score: number, security: number): Recomme
   return 'hold';
 }
 
-function hasToken(v?: string): boolean {
-  return Boolean(v && v.trim().length > 0);
-}
-
 function parsePositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -59,23 +56,58 @@ function isLegacyStrongToken(token: string): boolean {
   return token.length >= 20;
 }
 
-function isValidOverrideToken(v?: string): boolean {
-  const token = v?.trim() ?? '';
-  if (!token) return false;
+type ParsedOverrideToken = {
+  token: string;
+  iat: number;
+  exp: number;
+  nonce: string;
+  sig: string;
+};
 
-  const allowLegacy = process.env.INSTALL_OVERRIDE_ALLOW_LEGACY === 'true';
-  if (allowLegacy && isLegacyStrongToken(token)) {
-    return true;
+const usedOverrideNonces = new Map<string, number>();
+
+function gcUsedNonces(nowSec: number): void {
+  for (const [nonce, exp] of usedOverrideNonces.entries()) {
+    if (exp < nowSec) {
+      usedOverrideNonces.delete(nonce);
+    }
   }
+}
 
-  const match = /^ovr1\.(\d{10})\.(\d{10})\.([A-Za-z0-9_-]+)$/.exec(token);
-  if (!match) return false;
+function getOverrideSigningSecret(): string {
+  return process.env.INSTALL_OVERRIDE_SIGNING_SECRET?.trim() ?? '';
+}
 
-  const [, iatRaw, expRaw, nonce] = match;
+function parseSignedOverrideToken(v?: string): ParsedOverrideToken | null {
+  const token = v?.trim() ?? '';
+  if (!token) return null;
+
+  const match = /^ovr1\.(\d{10})\.(\d{10})\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(token);
+  if (!match) return null;
+
+  const [, iatRaw, expRaw, nonce, sig] = match;
   const iat = Number.parseInt(iatRaw, 10);
   const exp = Number.parseInt(expRaw, 10);
 
-  if (!Number.isFinite(iat) || !Number.isFinite(exp)) return false;
+  if (!Number.isFinite(iat) || !Number.isFinite(exp)) return null;
+
+  return { token, iat, exp, nonce, sig };
+}
+
+function verifySignature(token: ParsedOverrideToken, secret: string): boolean {
+  const payload = `${token.iat}.${token.exp}.${token.nonce}`;
+  const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+
+  const expectedBuf = Buffer.from(expected);
+  const actualBuf = Buffer.from(token.sig);
+
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return timingSafeEqual(expectedBuf, actualBuf);
+}
+
+function isValidSignedOverrideToken(parsed: ParsedOverrideToken): boolean {
+  const { iat, exp, nonce } = parsed;
+
   if (exp <= iat) return false;
 
   const maxTtlSec = parsePositiveIntEnv('INSTALL_OVERRIDE_MAX_TTL_SEC', 900);
@@ -89,12 +121,49 @@ function isValidOverrideToken(v?: string): boolean {
   if (new Set(nonce).size < 10) return false;
   if (isSimpleRepeatedPattern(nonce)) return false;
 
+  const secret = getOverrideSigningSecret();
+  if (!secret) return false;
+  if (!verifySignature(parsed, secret)) return false;
+
+  gcUsedNonces(nowSec);
+  if (usedOverrideNonces.has(nonce)) return false;
+
   return true;
+}
+
+function markOverrideTokenUsed(token: ParsedOverrideToken): void {
+  gcUsedNonces(Math.floor(Date.now() / 1000));
+  usedOverrideNonces.set(token.nonce, token.exp);
+}
+
+type OverrideValidationResult = {
+  valid: boolean;
+  parsed: ParsedOverrideToken | null;
+};
+
+function validateOverrideToken(v?: string): OverrideValidationResult {
+  const token = v?.trim() ?? '';
+  if (!token) return { valid: false, parsed: null };
+
+  const allowLegacy = process.env.INSTALL_OVERRIDE_ALLOW_LEGACY === 'true';
+  if (allowLegacy && isLegacyStrongToken(token)) {
+    return { valid: true, parsed: null };
+  }
+
+  const parsed = parseSignedOverrideToken(token);
+  if (!parsed) return { valid: false, parsed: null };
+  if (!isValidSignedOverrideToken(parsed)) return { valid: false, parsed: null };
+
+  return { valid: true, parsed };
 }
 
 function hasReason(v?: string): boolean {
   const reason = v?.trim() ?? '';
   return reason.length >= 8;
+}
+
+export function __resetOverrideNonceCacheForTests(): void {
+  usedOverrideNonces.clear();
 }
 
 export function planInstallAction(
@@ -129,8 +198,10 @@ export function planInstallAction(
   }
 
   if (effectiveDecision === 'hold') {
-    const canOverride = isValidOverrideToken(context.overrideToken) && hasReason(context.overrideReason);
+    const override = validateOverrideToken(context.overrideToken);
+    const canOverride = override.valid && hasReason(context.overrideReason);
     if (canOverride && context.confirmed) {
+      if (override.parsed) markOverrideTokenUsed(override.parsed);
       notes.push('hold overridden with strong token + reason + confirmation');
       return {
         policy,
@@ -171,8 +242,32 @@ export function planInstallAction(
   }
 
   if (policy === 'balanced') {
-    const hasStrongOverride = isValidOverrideToken(context.overrideToken) && isValidOverrideToken(context.strongOverrideToken);
-    if (hasStrongOverride && hasReason(context.overrideReason) && context.confirmed) {
+    const rawOverride = context.overrideToken?.trim() ?? '';
+    const rawStrongOverride = context.strongOverrideToken?.trim() ?? '';
+
+    if (rawOverride && rawStrongOverride && rawOverride === rawStrongOverride) {
+      notes.push('balanced policy: override tokens must be distinct');
+      return {
+        policy,
+        originalDecision: decision,
+        effectiveDecision,
+        action: 'confirm-install',
+        canInstall: false,
+        notes
+      };
+    }
+
+    const override = validateOverrideToken(context.overrideToken);
+    const strongOverride = validateOverrideToken(context.strongOverrideToken);
+    const hasStrongOverride = override.valid && strongOverride.valid;
+
+    const nonceConflict = Boolean(
+      override.parsed && strongOverride.parsed && override.parsed.nonce === strongOverride.parsed.nonce
+    );
+
+    if (!nonceConflict && hasStrongOverride && hasReason(context.overrideReason) && context.confirmed) {
+      if (override.parsed) markOverrideTokenUsed(override.parsed);
+      if (strongOverride.parsed) markOverrideTokenUsed(strongOverride.parsed);
       notes.push('balanced policy: block overridden with strong override tokens + reason + confirmation');
       return {
         policy,
@@ -196,7 +291,9 @@ export function planInstallAction(
   }
 
   // fast policy
-  if (isValidOverrideToken(context.overrideToken) && hasReason(context.overrideReason) && context.confirmed) {
+  const override = validateOverrideToken(context.overrideToken);
+  if (override.valid && hasReason(context.overrideReason) && context.confirmed) {
+    if (override.parsed) markOverrideTokenUsed(override.parsed);
     notes.push('fast policy: block overridden with strong token + reason + confirmation');
     return {
       policy,
