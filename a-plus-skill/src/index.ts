@@ -15,35 +15,22 @@ import {
 import { renderWeeklyReport } from './report/weeklyReport.js';
 import { sendWeeklyReport } from './delivery/reportSender.js';
 import { securityScore } from './security/riskScoring.js';
-import type { ProfileConfig, ProfileRegistry, ProfileType, RecommendationResult } from './types/index.js';
+import type { ProfileConfig, RecommendationResult } from './types/index.js';
+import { getSafeDefaultProfile, normalizeRegistry, resolveProfile } from './profile/normalize.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const profileConfigPath = resolve(currentDir, '../config/profile.default.json');
 
-function isProfileType(value: string): value is ProfileType {
-  return value === 'developer' || value === 'automation' || value === 'assistant';
-}
-
-async function loadProfile(): Promise<ProfileConfig> {
-  const fileContent = await readFile(profileConfigPath, 'utf8');
-  const registry = JSON.parse(fileContent) as ProfileRegistry;
-
-  const envProfileRaw = (process.env.PROFILE_TYPE ?? '').trim().toLowerCase();
-  const profileType = isProfileType(envProfileRaw)
-    ? envProfileRaw
-    : (registry.defaultProfile ?? 'developer');
-
-  const profileData = registry.profiles?.[profileType] ?? registry.profiles?.developer;
-  if (!profileData) {
-    throw new Error(`profile configuration is missing for type: ${profileType}`);
+export async function loadProfile(): Promise<ProfileConfig> {
+  try {
+    const fileContent = await readFile(profileConfigPath, 'utf8');
+    const rawRegistry = JSON.parse(fileContent) as unknown;
+    const registry = normalizeRegistry(rawRegistry, (msg) => console.warn(msg));
+    return resolveProfile(registry, process.env.PROFILE_TYPE, (msg) => console.warn(msg));
+  } catch (error) {
+    console.warn('[profile] failed to load/parse profile config; fallback to safe default profile (developer)', error);
+    return getSafeDefaultProfile();
   }
-
-  return {
-    type: profileType,
-    focusKeywords: Array.isArray(profileData.focusKeywords) ? profileData.focusKeywords : [],
-    avoidKeywords: Array.isArray(profileData.avoidKeywords) ? profileData.avoidKeywords : [],
-    preferredAuthors: Array.isArray(profileData.preferredAuthors) ? profileData.preferredAuthors : []
-  };
 }
 
 async function main() {

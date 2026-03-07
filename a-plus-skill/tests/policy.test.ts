@@ -6,6 +6,13 @@ describe('policy', () => {
     expect(decide('balanced', 90, 30)).toBe('block');
   });
 
+  it('applies deterministic hysteresis near score thresholds to prevent upward flips', () => {
+    expect(decide('balanced', 60.5, 80)).toBe('hold');
+    expect(decide('balanced', 75.2, 80)).toBe('caution');
+    expect(decide('balanced', 61.2, 80)).toBe('caution');
+    expect(decide('balanced', 76.5, 80)).toBe('recommend');
+  });
+
   it('forces effective hold on degraded mode and disallows any install', () => {
     const plan = planInstallAction('balanced', 'recommend', {
       degraded: true,

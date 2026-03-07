@@ -6,6 +6,7 @@ import {
   calculateTrendScore
 } from '../src/recommender/scoring.js';
 import type { ProfileConfig, SkillMeta } from '../src/types/index.js';
+import { normalizeProfile } from '../src/profile/normalize.js';
 
 function makeSkill(overrides: Partial<SkillMeta> = {}): SkillMeta {
   return {
@@ -98,5 +99,22 @@ describe('scoring', () => {
     const result = calculateFinalScore({ fit: 80, trend: 60, stability: 70, security: 90 });
     expect(result).toBeGreaterThan(0);
     expect(result).toBeLessThanOrEqual(100);
+  });
+
+  it('normalizes polluted profile arrays without crashing scoring', () => {
+    const polluted = normalizeProfile('developer', {
+      focusKeywords: ['typescript', 123, { bad: true }, 'api'],
+      avoidKeywords: ['game', false, null],
+      preferredAuthors: ['openclaw', 999]
+    });
+
+    const skill = makeSkill();
+    const fit = calculateFitScore(skill, polluted);
+
+    expect(fit).toBeGreaterThanOrEqual(0);
+    expect(fit).toBeLessThanOrEqual(100);
+    expect(polluted.focusKeywords).toEqual(['typescript', 'api']);
+    expect(polluted.avoidKeywords).toEqual(['game']);
+    expect(polluted.preferredAuthors).toEqual(['openclaw']);
   });
 });

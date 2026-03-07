@@ -1,13 +1,30 @@
 import type { InstallPlan, InstallPolicyContext, Policy, RecommendationResult } from '../types/index.js';
 
+const DECISION_HYSTERESIS_BAND = 1;
+
+function applyConservativeHysteresis(score: number): number {
+  let adjusted = score;
+
+  if (Math.abs(adjusted - 75) <= DECISION_HYSTERESIS_BAND) {
+    adjusted = Math.min(adjusted, 74);
+  }
+
+  if (Math.abs(adjusted - 60) <= DECISION_HYSTERESIS_BAND) {
+    adjusted = Math.min(adjusted, 59);
+  }
+
+  return adjusted;
+}
+
 export function decide(policy: Policy, score: number, security: number): RecommendationResult['decision'] {
   const strictBoost = policy === 'strict' ? 10 : 0;
   const fastPenalty = policy === 'fast' ? -10 : 0;
   const securityGate = security + strictBoost + fastPenalty;
+  const bufferedScore = applyConservativeHysteresis(score);
 
   if (securityGate < 40) return 'block';
-  if (score >= 75 && securityGate >= 70) return 'recommend';
-  if (score >= 60 && securityGate >= 55) return 'caution';
+  if (bufferedScore >= 75 && securityGate >= 70) return 'recommend';
+  if (bufferedScore >= 60 && securityGate >= 55) return 'caution';
   return 'hold';
 }
 
