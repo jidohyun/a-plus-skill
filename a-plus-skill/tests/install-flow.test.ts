@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultRunner,
@@ -53,6 +53,36 @@ function runAuditVerify(logPath: string): ReturnType<typeof spawnSync> {
       INSTALL_AUDIT_LOG_PATH: logPath
     },
     encoding: 'utf8'
+  });
+}
+
+function runAuditWriterProcess(logPath: string, slug: string): Promise<{ code: number | null; stderr: string }> {
+  const childScript = `
+import { runInstall } from './src/install/openclawInstaller.ts';
+import { planInstallAction } from './src/policy/policyEngine.ts';
+const plan = planInstallAction('balanced', 'recommend', {});
+await runInstall(${JSON.stringify(slug)}, plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+`;
+
+  return new Promise((resolve) => {
+    const child = spawn('node', ['--input-type=module', '--import', 'tsx', '-e', childScript], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        INSTALL_AUDIT_LOG_PATH: logPath,
+        INSTALL_OVERRIDE_SIGNING_SECRET: TEST_SIGNING_SECRET
+      },
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on('close', (code) => {
+      resolve({ code, stderr });
+    });
   });
 }
 
@@ -465,6 +495,46 @@ describe('install flow', () => {
     const result = runAuditVerify(logPath);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('malformed JSON');
+  });
+
+  it('fails audit verify on schemaVersion mismatch', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    await runInstall('demo/schema', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    const event = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
+    event.schemaVersion = 2;
+    lines[0] = JSON.stringify(event);
+    writeFileSync(logPath, `${lines.join('\n')}\n`, 'utf8');
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('schemaVersion mismatch (expected=1, actual=2)');
+  });
+
+  it('keeps hash chain valid for parallel multi-process audit writes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+
+    const writes = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => runAuditWriterProcess(logPath, `demo/parallel-${i}`))
+    );
+
+    for (const write of writes) {
+      expect(write.code).toBe(0);
+      expect(write.stderr).toBe('');
+    }
+
+    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(8);
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK verified=8');
   });
 
   it('continues install flow when audit log write fails', async () => {

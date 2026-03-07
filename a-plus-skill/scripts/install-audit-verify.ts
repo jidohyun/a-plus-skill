@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const GENESIS_PREV_HASH = 'genesis';
+const EXPECTED_SCHEMA_VERSION = 1;
 
 type InstallAuditEvent = {
   schemaVersion: number;
@@ -90,6 +91,12 @@ function verifyEvents(lines: string[]): VerifyResult {
     }
     if (typeof event.schemaVersion !== 'number') {
       return fail(lineNumber, 'missing/invalid schemaVersion');
+    }
+    if (event.schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+      return fail(
+        lineNumber,
+        `schemaVersion mismatch (expected=${EXPECTED_SCHEMA_VERSION}, actual=${event.schemaVersion})`
+      );
     }
 
     if (event.prevHash !== expectedPrevHash) {

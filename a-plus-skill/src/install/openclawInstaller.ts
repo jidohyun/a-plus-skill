@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
 import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
@@ -232,8 +232,49 @@ function getInstallAuditPath(): string {
 
 const INSTALL_AUDIT_SCHEMA_VERSION = 1;
 const GENESIS_PREV_HASH = 'genesis';
+const INSTALL_AUDIT_LOCK_SUFFIX = '.lock';
+const INSTALL_AUDIT_LOCK_TIMEOUT_MS = 1_000;
+const INSTALL_AUDIT_LOCK_BACKOFF_MS = 10;
 
 type InstallAuditPayload = Omit<InstallAuditEvent, 'hash'>;
+
+function blockForMs(ms: number): void {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    // intentional short sync backoff; keeps writeInstallAuditEvent fail-open and dependency-free
+  }
+}
+
+function acquireInstallAuditLock(file: string): () => void {
+  const lockPath = `${file}${INSTALL_AUDIT_LOCK_SUFFIX}`;
+  const deadline = Date.now() + INSTALL_AUDIT_LOCK_TIMEOUT_MS;
+
+  while (Date.now() <= deadline) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      return () => {
+        try {
+          closeSync(fd);
+        } catch {
+          // best effort close
+        }
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // best effort unlock
+        }
+      };
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+      blockForMs(INSTALL_AUDIT_LOCK_BACKOFF_MS);
+    }
+  }
+
+  throw new Error(`install audit lock timeout after ${INSTALL_AUDIT_LOCK_TIMEOUT_MS}ms`);
+}
 
 function canonicalStringify(value: unknown): string {
   if (Array.isArray(value)) {
@@ -277,9 +318,13 @@ function readPreviousAuditHash(file: string): string {
 }
 
 export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | 'prevHash' | 'eventId' | 'schemaVersion'>): void {
+  let releaseLock: (() => void) | undefined;
+
   try {
     const file = getInstallAuditPath();
     mkdirSync(dirname(file), { recursive: true });
+
+    releaseLock = acquireInstallAuditLock(file);
 
     const payload: InstallAuditPayload = {
       schemaVersion: INSTALL_AUDIT_SCHEMA_VERSION,
@@ -296,6 +341,8 @@ export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | '
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[install-audit] failed to append JSONL event: ${sanitizeSensitiveText(reason)}`);
+  } finally {
+    releaseLock?.();
   }
 }
 
