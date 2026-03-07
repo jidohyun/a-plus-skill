@@ -57,9 +57,12 @@ export type InstallOutcome = {
   status: 'installed' | 'skipped' | 'failed';
   command?: string;
   code?: number | null;
+  signal?: NodeJS.Signals | null;
   stdout?: string;
   stderr?: string;
   error?: string;
+  elapsedMs?: number;
+  timeoutMs?: number;
 };
 
 export type RecommendationResult = {

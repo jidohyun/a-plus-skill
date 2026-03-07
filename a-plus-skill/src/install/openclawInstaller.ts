@@ -5,9 +5,12 @@ import type { InstallOutcome, InstallPlan } from '../types/index.js';
 
 export type InstallRunnerResult = {
   code: number | null;
+  signal?: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
   error?: string;
+  elapsedMs?: number;
+  timeoutMs?: number;
 };
 
 export type InstallRunner = (slug: string) => Promise<InstallRunnerResult>;
@@ -15,6 +18,10 @@ export type InstallRunner = (slug: string) => Promise<InstallRunnerResult>;
 const ALLOWED_BASE_COMMANDS = new Set(['openclaw']);
 const STRICT_SUBCOMMAND = ['skill', 'install'];
 const SLUG_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+const DEFAULT_INSTALL_TIMEOUT_MS = 60_000;
+const MIN_INSTALL_TIMEOUT_MS = 1_000;
+const MAX_INSTALL_TIMEOUT_MS = 300_000;
+const TERM_GRACE_MS = 2_000;
 
 function validateSlug(slug: string): string | null {
   if (!SLUG_PATTERN.test(slug)) {
@@ -47,14 +54,37 @@ function buildInstallCommand(slug: string): { command: string; args: string[] } 
   };
 }
 
+function parseInstallCommandTimeoutMs(raw = process.env.INSTALL_COMMAND_TIMEOUT_MS): number {
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_INSTALL_TIMEOUT_MS;
+  }
+  const rounded = Math.floor(parsed);
+  return Math.max(MIN_INSTALL_TIMEOUT_MS, Math.min(MAX_INSTALL_TIMEOUT_MS, rounded));
+}
+
 export function createDefaultRunner(): InstallRunner {
   return async (slug: string) => {
     const { command, args } = buildInstallCommand(slug);
+    const timeoutMs = parseInstallCommandTimeoutMs();
 
     return new Promise<InstallRunnerResult>((resolve) => {
+      const startedAt = Date.now();
       const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let timeoutTriggered = false;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      let graceHandle: NodeJS.Timeout | undefined;
+
+      const finish = (result: InstallRunnerResult): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (graceHandle) clearTimeout(graceHandle);
+        resolve(result);
+      };
 
       child.stdout.on('data', (chunk) => {
         stdout += String(chunk);
@@ -62,11 +92,48 @@ export function createDefaultRunner(): InstallRunner {
       child.stderr.on('data', (chunk) => {
         stderr += String(chunk);
       });
+
+      timeoutHandle = setTimeout(() => {
+        timeoutTriggered = true;
+        const termSent = child.kill('SIGTERM');
+        if (!termSent) {
+          return;
+        }
+
+        graceHandle = setTimeout(() => {
+          if (!settled) {
+            child.kill('SIGKILL');
+          }
+        }, TERM_GRACE_MS);
+      }, timeoutMs);
+
       child.on('error', (err) => {
-        resolve({ code: null, stdout, stderr, error: err.message });
+        finish({
+          code: null,
+          stdout,
+          stderr,
+          error: timeoutTriggered ? 'timeout' : err.message,
+          elapsedMs: Date.now() - startedAt,
+          timeoutMs
+        });
       });
-      child.on('close', (code) => {
-        resolve({ code, stdout, stderr });
+
+      child.on('close', (code, signal) => {
+        const elapsedMs = Date.now() - startedAt;
+        if (timeoutTriggered) {
+          finish({
+            code,
+            signal,
+            stdout,
+            stderr,
+            error: 'timeout',
+            elapsedMs,
+            timeoutMs
+          });
+          return;
+        }
+
+        finish({ code, signal, stdout, stderr, elapsedMs, timeoutMs });
       });
     });
   };
@@ -112,7 +179,7 @@ export async function runInstall(
     };
   }
 
-  let commandPreview = `${process.env.OPENCLAW_INSTALL_COMMAND ?? 'openclaw skill install'} -- ${slug}`;
+  const commandPreview = `${process.env.OPENCLAW_INSTALL_COMMAND ?? 'openclaw skill install'} -- ${slug}`;
   writeAudit(plan, slug);
   try {
     const run = await runner(slug);
@@ -126,9 +193,12 @@ export async function runInstall(
       status: success ? 'installed' : 'failed',
       command: commandPreview,
       code: run.code,
+      signal: run.signal,
       stdout: run.stdout,
       stderr: run.stderr,
-      error: run.error
+      error: run.error,
+      elapsedMs: run.elapsedMs,
+      timeoutMs: run.timeoutMs
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

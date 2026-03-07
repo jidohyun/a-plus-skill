@@ -167,6 +167,11 @@ npm run collector:status -- --strict
 
 - `OPENCLAW_INSTALL_COMMAND`: 설치 커맨드 베이스 (기본 `openclaw skill install`)
   - 보안상 첫 토큰은 `openclaw`만 허용되며, 서브커맨드는 반드시 `skill install`로 시작해야 합니다.
+- `INSTALL_COMMAND_TIMEOUT_MS`: 개별 `openclaw skill install` 실행 타임아웃(ms)
+  - 기본값: `60000` (60초)
+  - 비정상 입력(빈값/NaN/0 이하)은 기본값으로 fallback
+  - 권장 범위: `5000 ~ 120000` (내부적으로 최소 `1000`, 최대 `300000`으로 클램프)
+  - 타임아웃 시 `SIGTERM` 후 짧은 grace 기간 뒤 미종료 프로세스는 `SIGKILL`로 강제 종료하고, 결과는 `failed(timeout)`으로 표준화됩니다.
 
 #### Override token 형식 (`ovr1`)
 - 포맷: `ovr1.<iat>.<exp>.<nonce>.<sig>`
