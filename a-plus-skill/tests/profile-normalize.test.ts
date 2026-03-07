@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { normalizeRegistry, resolveProfile } from '../src/profile/normalize.js';
+import { getSafeDefaultProfile, normalizeRegistry, resolveProfile } from '../src/profile/normalize.js';
 
 describe('profile normalization', () => {
   it('falls back to default profile when PROFILE_TYPE is invalid', () => {
@@ -47,5 +47,13 @@ describe('profile normalization', () => {
     expect(registry.profiles.automation.focusKeywords).toEqual([]);
     expect(registry.profiles.assistant.preferredAuthors).toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid or missing defaultProfile'));
+  });
+
+  it('returns isolated arrays in safe default profile', () => {
+    const first = getSafeDefaultProfile();
+    first.focusKeywords.push('mutated');
+
+    const second = getSafeDefaultProfile();
+    expect(second.focusKeywords).toEqual([]);
   });
 });

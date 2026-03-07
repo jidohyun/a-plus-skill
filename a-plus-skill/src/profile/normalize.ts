@@ -112,5 +112,10 @@ export function resolveProfile(
 }
 
 export function getSafeDefaultProfile(): ProfileConfig {
-  return { ...SAFE_DEFAULT_PROFILE };
+  return {
+    type: SAFE_DEFAULT_PROFILE.type,
+    focusKeywords: [...SAFE_DEFAULT_PROFILE.focusKeywords],
+    avoidKeywords: [...SAFE_DEFAULT_PROFILE.avoidKeywords],
+    preferredAuthors: [...SAFE_DEFAULT_PROFILE.preferredAuthors]
+  };
 }
