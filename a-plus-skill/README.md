@@ -170,8 +170,18 @@ npm run collector:status -- --strict
 - `INSTALL_COMMAND_TIMEOUT_MS`: 개별 `openclaw skill install` 실행 타임아웃(ms)
   - 기본값: `60000` (60초)
   - 비정상 입력(빈값/NaN/0 이하)은 기본값으로 fallback
-  - 권장 범위: `5000 ~ 120000` (내부적으로 최소 `1000`, 최대 `300000`으로 클램프)
-  - 타임아웃 시 `SIGTERM` 후 짧은 grace 기간 뒤 미종료 프로세스는 `SIGKILL`로 강제 종료하고, 결과는 `failed(timeout)`으로 표준화됩니다.
+  - 내부 범위: 최소 `1000` + 토폴로지별 hard cap으로 클램프
+    - `INSTALL_TOPOLOGY=local-dev`: 최대 `300000`
+    - `INSTALL_TOPOLOGY=single-instance`: 최대 `120000`
+    - `INSTALL_TOPOLOGY=multi-instance`: 최대 `90000`
+  - 타임아웃 시 종료 순서(가능한 플랫폼/POSIX 우선):
+    1) detached process group에 `SIGTERM` (`process.kill(-pid, SIGTERM)`)
+    2) grace 후 미종료 시 `SIGKILL` (`process.kill(-pid, SIGKILL)`)
+    3) 그룹 signal 실패 시 `child.kill(...)` fallback
+  - 결과는 항상 `failed(timeout)`으로 표준화됩니다.
+- `INSTALL_TIMEOUT_RECOVERY_DELAY_MS`: timeout/SIGKILL 직후 다음 항목 처리 전 회복 지연(ms)
+  - 기본값: `250`
+  - `0~2000` 범위로 클램프 (0이면 지연 비활성)
 
 #### Override token 형식 (`ovr1`)
 - 포맷: `ovr1.<iat>.<exp>.<nonce>.<sig>`

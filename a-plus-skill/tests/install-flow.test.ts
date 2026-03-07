@@ -1,6 +1,16 @@
 import { createHmac } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createDefaultRunner, runInstall } from '../src/install/openclawInstaller.js';
+import { EventEmitter } from 'node:events';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  createDefaultRunner,
+  parseInstallCommandTimeoutMs,
+  runInstall
+} from '../src/install/openclawInstaller.js';
+import {
+  parseInstallTimeoutRecoveryDelayMs,
+  shouldRecoverAfterInstallTimeout,
+  waitForInstallTimeoutRecovery
+} from '../src/index.js';
 import { __resetOverrideNonceCacheForTests, planInstallAction } from '../src/policy/policyEngine.js';
 
 const TEST_SIGNING_SECRET = 'test-signing-secret';
@@ -15,6 +25,22 @@ function makeCurrentOverrideToken(): string {
   return `ovr1.${iat}.${exp}.${nonce}.${sig}`;
 }
 
+type FakeChild = EventEmitter & {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  pid: number;
+  kill: (signal?: NodeJS.Signals) => boolean;
+};
+
+function createFakeChild(pid = 4321): FakeChild {
+  const child = new EventEmitter() as FakeChild;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.pid = pid;
+  child.kill = vi.fn(() => true);
+  return child;
+}
+
 beforeEach(() => {
   __resetOverrideNonceCacheForTests();
   process.env.INSTALL_OVERRIDE_SIGNING_SECRET = TEST_SIGNING_SECRET;
@@ -24,6 +50,7 @@ afterEach(() => {
   __resetOverrideNonceCacheForTests();
   delete process.env.INSTALL_OVERRIDE_SIGNING_SECRET;
   delete process.env.INSTALL_COMMAND_TIMEOUT_MS;
+  delete process.env.INSTALL_TIMEOUT_RECOVERY_DELAY_MS;
 });
 
 describe('install flow', () => {
@@ -124,13 +151,64 @@ describe('install flow', () => {
     expect(outcome.error).toContain('invalid slug format');
   });
 
-  it('falls back to default timeout on invalid INSTALL_COMMAND_TIMEOUT_MS', async () => {
-    process.env.INSTALL_COMMAND_TIMEOUT_MS = 'not-a-number';
-    const runner = createDefaultRunner();
+  it('uses tree-aware process group kill on timeout (POSIX path)', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild(7001);
+    const spawnImpl = vi.fn(() => child);
+    const processKill = vi.fn(() => true);
 
-    const result = await runner('demo/skill');
+    process.env.INSTALL_COMMAND_TIMEOUT_MS = '5';
+    const runner = createDefaultRunner({ spawnImpl, processKill, topology: 'single-instance' });
 
-    expect(result.timeoutMs).toBe(60000);
+    const pending = runner('demo/skill');
+    await vi.advanceTimersByTimeAsync(5);
+    await vi.advanceTimersByTimeAsync(2100);
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(processKill).toHaveBeenCalledWith(-7001, 'SIGTERM');
+    expect(processKill).toHaveBeenCalledWith(-7001, 'SIGKILL');
+    expect((child.kill as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+
+    child.emit('close', null, 'SIGKILL');
+    const result = await pending;
+    expect(result.error).toBe('timeout');
+
+    vi.useRealTimers();
+  });
+
+  it('falls back to child.kill when process group kill fails', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild(7002);
+    const spawnImpl = vi.fn(() => child);
+    const processKill = vi.fn(() => {
+      throw new Error('not permitted');
+    });
+
+    process.env.INSTALL_COMMAND_TIMEOUT_MS = '5';
+    const runner = createDefaultRunner({ spawnImpl, processKill, topology: 'single-instance' });
+
+    const pending = runner('demo/skill');
+    await vi.advanceTimersByTimeAsync(5);
+    await vi.advanceTimersByTimeAsync(2100);
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(processKill).toHaveBeenCalledWith(-7002, 'SIGTERM');
+    expect(processKill).toHaveBeenCalledWith(-7002, 'SIGKILL');
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+    child.emit('close', null, 'SIGKILL');
+    const result = await pending;
+    expect(result.error).toBe('timeout');
+
+    vi.useRealTimers();
+  });
+
+  it('applies topology-aware timeout cap and invalid fallback', () => {
+    expect(parseInstallCommandTimeoutMs('999999', 'local-dev')).toBe(300000);
+    expect(parseInstallCommandTimeoutMs('999999', 'single-instance')).toBe(120000);
+    expect(parseInstallCommandTimeoutMs('999999', 'multi-instance')).toBe(90000);
+    expect(parseInstallCommandTimeoutMs('not-a-number', 'multi-instance')).toBe(60000);
   });
 
   it('continues processing next skill even after one timeout failure', async () => {
@@ -165,5 +243,40 @@ describe('install flow', () => {
     expect(outcomes[0]?.status).toBe('failed');
     expect(outcomes[0]?.error).toBe('timeout');
     expect(outcomes[1]?.status).toBe('installed');
+  });
+
+  it('applies timeout recovery delay and keeps batch continuity', async () => {
+    process.env.INSTALL_TIMEOUT_RECOVERY_DELAY_MS = '250';
+    const sleep = vi.fn(async () => {});
+    const plan = planInstallAction('balanced', 'recommend', {});
+
+    const first = await runInstall('demo/slow', plan, async () => ({
+      code: null,
+      signal: 'SIGKILL',
+      stdout: '',
+      stderr: 'timeout exceeded',
+      error: 'timeout',
+      elapsedMs: 3000,
+      timeoutMs: 1000
+    }));
+
+    const delayApplied = await waitForInstallTimeoutRecovery(first, sleep);
+
+    const second = await runInstall('demo/ok', plan, async () => ({
+      code: 0,
+      stdout: 'installed',
+      stderr: ''
+    }));
+
+    expect(shouldRecoverAfterInstallTimeout(first)).toBe(true);
+    expect(delayApplied).toBe(250);
+    expect(sleep).toHaveBeenCalledWith(250);
+    expect(second.status).toBe('installed');
+  });
+
+  it('clamps recovery delay env to safe range', () => {
+    expect(parseInstallTimeoutRecoveryDelayMs('999999')).toBe(2000);
+    expect(parseInstallTimeoutRecoveryDelayMs('-1')).toBe(250);
+    expect(parseInstallTimeoutRecoveryDelayMs('0')).toBe(0);
   });
 });

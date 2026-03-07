@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fetchCandidateSkills } from './collector/clawhubClient.js';
 import { loadInstallPolicyContextFromEnv, loadInstallTopologyFromEnv, loadPolicyFromEnv } from './install/confirm.js';
@@ -16,7 +16,7 @@ import {
 import { renderWeeklyReport } from './report/weeklyReport.js';
 import { sendWeeklyReport } from './delivery/reportSender.js';
 import { securityScore } from './security/riskScoring.js';
-import type { ProfileConfig, RecommendationResult } from './types/index.js';
+import type { InstallOutcome, ProfileConfig, RecommendationResult } from './types/index.js';
 import { getSafeDefaultProfile, normalizeRegistry, resolveProfile } from './profile/normalize.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -34,7 +34,39 @@ export async function loadProfile(): Promise<ProfileConfig> {
   }
 }
 
-async function main() {
+export function parseInstallTimeoutRecoveryDelayMs(raw = process.env.INSTALL_TIMEOUT_RECOVERY_DELAY_MS): number {
+  const defaultDelayMs = 250;
+  const minDelayMs = 0;
+  const maxDelayMs = 2_000;
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed) || parsed < 0) {
+    return defaultDelayMs;
+  }
+  const rounded = Math.floor(parsed);
+  return Math.max(minDelayMs, Math.min(maxDelayMs, rounded));
+}
+
+export function shouldRecoverAfterInstallTimeout(outcome?: InstallOutcome): boolean {
+  if (!outcome) return false;
+  return outcome.error === 'timeout' || outcome.signal === 'SIGKILL';
+}
+
+export async function waitForInstallTimeoutRecovery(
+  outcome: InstallOutcome,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+): Promise<number> {
+  if (!shouldRecoverAfterInstallTimeout(outcome)) {
+    return 0;
+  }
+
+  const delayMs = parseInstallTimeoutRecoveryDelayMs();
+  if (delayMs > 0) {
+    await sleep(delayMs);
+  }
+  return delayMs;
+}
+
+export async function main() {
   const profile = await loadProfile();
   const { skills, meta } = await fetchCandidateSkills();
   const policy = loadPolicyFromEnv('balanced');
@@ -45,7 +77,8 @@ async function main() {
 
   const results: RecommendationResult[] = [];
 
-  for (const s of skills) {
+  for (let i = 0; i < skills.length; i += 1) {
+    const s = skills[i]!;
     const fitScore = calculateFitScore(s, profile);
     const trendScore = calculateTrendScore(s);
     const stabilityScore = calculateStabilityScore(s);
@@ -83,6 +116,10 @@ async function main() {
       installAction: installPlan.action,
       installOutcome
     });
+
+    if (i < skills.length - 1) {
+      await waitForInstallTimeoutRecovery(installOutcome);
+    }
   }
 
   const report = renderWeeklyReport(results, meta);
@@ -98,7 +135,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('A+ run failed:', err);
-  process.exit(1);
-});
+const entry = process.argv[1] ? pathToFileURL(process.argv[1]).href : undefined;
+if (entry && import.meta.url === entry) {
+  main().catch((err) => {
+    console.error('A+ run failed:', err);
+    process.exit(1);
+  });
+}

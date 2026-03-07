@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { InstallOutcome, InstallPlan } from '../types/index.js';
+import { loadInstallTopologyFromEnv } from './confirm.js';
+import type { InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
 
 export type InstallRunnerResult = {
   code: number | null;
@@ -20,7 +21,11 @@ const STRICT_SUBCOMMAND = ['skill', 'install'];
 const SLUG_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const DEFAULT_INSTALL_TIMEOUT_MS = 60_000;
 const MIN_INSTALL_TIMEOUT_MS = 1_000;
-const MAX_INSTALL_TIMEOUT_MS = 300_000;
+const TOPOLOGY_TIMEOUT_CAP_MS: Record<InstallTopology, number> = {
+  'local-dev': 300_000,
+  'single-instance': 120_000,
+  'multi-instance': 90_000
+};
 const TERM_GRACE_MS = 2_000;
 
 function validateSlug(slug: string): string | null {
@@ -54,23 +59,47 @@ function buildInstallCommand(slug: string): { command: string; args: string[] } 
   };
 }
 
-function parseInstallCommandTimeoutMs(raw = process.env.INSTALL_COMMAND_TIMEOUT_MS): number {
+export function parseInstallCommandTimeoutMs(
+  raw = process.env.INSTALL_COMMAND_TIMEOUT_MS,
+  topology: InstallTopology = loadInstallTopologyFromEnv('single-instance')
+): number {
+  const cap = TOPOLOGY_TIMEOUT_CAP_MS[topology] ?? TOPOLOGY_TIMEOUT_CAP_MS['single-instance'];
   const parsed = Number(raw);
   if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_INSTALL_TIMEOUT_MS;
+    return Math.min(DEFAULT_INSTALL_TIMEOUT_MS, cap);
   }
   const rounded = Math.floor(parsed);
-  return Math.max(MIN_INSTALL_TIMEOUT_MS, Math.min(MAX_INSTALL_TIMEOUT_MS, rounded));
+  return Math.max(MIN_INSTALL_TIMEOUT_MS, Math.min(cap, rounded));
 }
 
-export function createDefaultRunner(): InstallRunner {
+type RunnerChild = {
+  pid?: number;
+  stdout: { on: (event: 'data', listener: (chunk: unknown) => void) => unknown };
+  stderr: { on: (event: 'data', listener: (chunk: unknown) => void) => unknown };
+  kill: (signal?: NodeJS.Signals) => boolean;
+  on: (event: 'error' | 'close', listener: (...args: any[]) => void) => unknown;
+};
+
+type RunnerDeps = {
+  spawnImpl?: (command: string, args: string[], options: { stdio: ['ignore', 'pipe', 'pipe']; detached: boolean }) => RunnerChild;
+  processKill?: (pid: number, signal?: NodeJS.Signals | number) => boolean;
+  topology?: InstallTopology;
+};
+
+export function createDefaultRunner(deps: RunnerDeps = {}): InstallRunner {
   return async (slug: string) => {
     const { command, args } = buildInstallCommand(slug);
-    const timeoutMs = parseInstallCommandTimeoutMs();
+    const timeoutMs = parseInstallCommandTimeoutMs(process.env.INSTALL_COMMAND_TIMEOUT_MS, deps.topology);
 
     return new Promise<InstallRunnerResult>((resolve) => {
       const startedAt = Date.now();
-      const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const spawnImpl = deps.spawnImpl ?? ((command, args, options) => spawn(command, args, options));
+      const processKill = deps.processKill ?? process.kill.bind(process);
+      const useDetached = process.platform !== 'win32';
+      const child = spawnImpl(command, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: useDetached
+      });
       let stdout = '';
       let stderr = '';
       let settled = false;
@@ -93,16 +122,34 @@ export function createDefaultRunner(): InstallRunner {
         stderr += String(chunk);
       });
 
+      const killTreeOrChild = (signal: NodeJS.Signals): boolean => {
+        const pid = child.pid;
+        if (typeof pid === 'number' && pid > 0 && process.platform !== 'win32') {
+          try {
+            processKill(-pid, signal);
+            return true;
+          } catch {
+            // fallback to legacy direct child signal when group signal fails
+          }
+        }
+
+        try {
+          return child.kill(signal);
+        } catch {
+          return false;
+        }
+      };
+
       timeoutHandle = setTimeout(() => {
         timeoutTriggered = true;
-        const termSent = child.kill('SIGTERM');
+        const termSent = killTreeOrChild('SIGTERM');
         if (!termSent) {
           return;
         }
 
         graceHandle = setTimeout(() => {
           if (!settled) {
-            child.kill('SIGKILL');
+            killTreeOrChild('SIGKILL');
           }
         }, TERM_GRACE_MS);
       }, timeoutMs);
