@@ -32,10 +32,64 @@ function hasToken(v?: string): boolean {
   return Boolean(v && v.trim().length > 0);
 }
 
-function hasStrongToken(v?: string): boolean {
-  const token = v?.trim() ?? '';
-  // lightweight hardening: require sufficiently long mixed token
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isSimpleRepeatedPattern(value: string): boolean {
+  if (value.length === 0) return true;
+
+  for (let unitLen = 1; unitLen <= Math.floor(value.length / 2); unitLen += 1) {
+    if (value.length % unitLen !== 0) continue;
+
+    const unit = value.slice(0, unitLen);
+    if (unit.repeat(value.length / unitLen) === value) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isLegacyStrongToken(token: string): boolean {
   return token.length >= 20;
+}
+
+function isValidOverrideToken(v?: string): boolean {
+  const token = v?.trim() ?? '';
+  if (!token) return false;
+
+  const allowLegacy = process.env.INSTALL_OVERRIDE_ALLOW_LEGACY === 'true';
+  if (allowLegacy && isLegacyStrongToken(token)) {
+    return true;
+  }
+
+  const match = /^ovr1\.(\d{10})\.(\d{10})\.([A-Za-z0-9_-]+)$/.exec(token);
+  if (!match) return false;
+
+  const [, iatRaw, expRaw, nonce] = match;
+  const iat = Number.parseInt(iatRaw, 10);
+  const exp = Number.parseInt(expRaw, 10);
+
+  if (!Number.isFinite(iat) || !Number.isFinite(exp)) return false;
+  if (exp <= iat) return false;
+
+  const maxTtlSec = parsePositiveIntEnv('INSTALL_OVERRIDE_MAX_TTL_SEC', 900);
+  if (exp - iat > maxTtlSec) return false;
+
+  const clockSkewSec = parsePositiveIntEnv('INSTALL_OVERRIDE_CLOCK_SKEW_SEC', 60);
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (nowSec < iat - clockSkewSec || nowSec > exp + clockSkewSec) return false;
+
+  if (nonce.length < 22) return false;
+  if (new Set(nonce).size < 10) return false;
+  if (isSimpleRepeatedPattern(nonce)) return false;
+
+  return true;
 }
 
 function hasReason(v?: string): boolean {
@@ -75,7 +129,7 @@ export function planInstallAction(
   }
 
   if (effectiveDecision === 'hold') {
-    const canOverride = hasStrongToken(context.overrideToken) && hasReason(context.overrideReason);
+    const canOverride = isValidOverrideToken(context.overrideToken) && hasReason(context.overrideReason);
     if (canOverride && context.confirmed) {
       notes.push('hold overridden with strong token + reason + confirmation');
       return {
@@ -117,7 +171,7 @@ export function planInstallAction(
   }
 
   if (policy === 'balanced') {
-    const hasStrongOverride = hasStrongToken(context.overrideToken) && hasStrongToken(context.strongOverrideToken);
+    const hasStrongOverride = isValidOverrideToken(context.overrideToken) && isValidOverrideToken(context.strongOverrideToken);
     if (hasStrongOverride && hasReason(context.overrideReason) && context.confirmed) {
       notes.push('balanced policy: block overridden with strong override tokens + reason + confirmation');
       return {
@@ -142,7 +196,7 @@ export function planInstallAction(
   }
 
   // fast policy
-  if (hasStrongToken(context.overrideToken) && hasReason(context.overrideReason) && context.confirmed) {
+  if (isValidOverrideToken(context.overrideToken) && hasReason(context.overrideReason) && context.confirmed) {
     notes.push('fast policy: block overridden with strong token + reason + confirmation');
     return {
       policy,

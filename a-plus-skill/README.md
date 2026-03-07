@@ -132,9 +132,9 @@ npm run collector:status -- --strict
 - decision(`recommend/caution/hold/block`)을 install action으로 변환합니다.
 - 수집 degraded(`meta.degraded=true`)이면 `effectiveDecision=hold`로 강제하고 설치는 항상 `skip-install` 처리합니다(override 불가).
 - 정책별 우회 규칙:
-  - `strict`: hold는 **강한** `INSTALL_OVERRIDE_TOKEN`(20자+) + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
-  - `balanced`: hold는 strong token+reason+confirm 필요, block은 strong token 2개(`INSTALL_OVERRIDE_TOKEN`, `INSTALL_OVERRIDE_STRONG_TOKEN`) + reason + confirm 필요
-  - `fast`: hold/block 모두 strong token(20자+) + reason + confirm 필요
+  - `strict`: hold는 **유효한 override token** + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
+  - `balanced`: hold는 valid token+reason+confirm 필요, block은 valid token 2개(`INSTALL_OVERRIDE_TOKEN`, `INSTALL_OVERRIDE_STRONG_TOKEN`) + reason + confirm 필요
+  - `fast`: hold/block 모두 valid token + reason + confirm 필요
 - 기본값은 안전 모드: 확인/우회가 없으면 hold/block 설치는 실행되지 않습니다.
 - degraded 상태에서는 정책과 무관하게 설치는 항상 `skip-install`입니다.
 
@@ -144,8 +144,21 @@ npm run collector:status -- --strict
 - `INSTALL_OVERRIDE_TOKEN`: hold/block 우회 토큰
 - `INSTALL_OVERRIDE_STRONG_TOKEN`: balanced block 우회용 추가 토큰
 - `INSTALL_OVERRIDE_REASON`: balanced block 우회 사유
+- `INSTALL_OVERRIDE_MAX_TTL_SEC`: override token 최대 TTL(초), 기본 `900`
+- `INSTALL_OVERRIDE_CLOCK_SKEW_SEC`: clock skew 허용 오차(초), 기본 `60`
+- `INSTALL_OVERRIDE_ALLOW_LEGACY`: `true`일 때만 기존 20자+ 레거시 토큰 임시 허용(기본 `false`)
 - `OPENCLAW_INSTALL_COMMAND`: 설치 커맨드 베이스 (기본 `openclaw skill install`)
   - 보안상 첫 토큰은 `openclaw`만 허용되며, 서브커맨드는 반드시 `skill install`로 시작해야 합니다.
+
+#### Override token 형식 (`ovr1`)
+- 포맷: `ovr1.<iat>.<exp>.<nonce>`
+- `iat`, `exp`: 10자리 unix seconds
+- 검증 규칙:
+  - `exp > iat`
+  - `exp - iat <= INSTALL_OVERRIDE_MAX_TTL_SEC`
+  - 현재 시각(`now`)이 `[iat - INSTALL_OVERRIDE_CLOCK_SKEW_SEC, exp + INSTALL_OVERRIDE_CLOCK_SKEW_SEC]` 범위 내
+  - `nonce`는 길이 `22` 이상, unique char `10` 이상, 단순 반복 패턴(예: `aaaa...`, `abcdabcd...`) 거부
+- 레거시 전환: 마이그레이션 기간에만 `INSTALL_OVERRIDE_ALLOW_LEGACY=true`를 사용하고, 안정화 후 제거 권장
 
 ## 산출 예시
 - top 추천 리스트 + 보안 상태(`recommend/caution/hold/block`)

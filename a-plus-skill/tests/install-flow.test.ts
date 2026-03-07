@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { runInstall } from '../src/install/openclawInstaller.js';
 import { planInstallAction } from '../src/policy/policyEngine.js';
 
+function makeCurrentOverrideToken(): string {
+  const now = Math.floor(Date.now() / 1000);
+  return `ovr1.${now - 10}.${now + 120}.AbCdEfGhIjKlMnOpQrStUvWX`;
+}
+
 describe('install flow', () => {
   it('does not run installer when hold has no override', async () => {
     const plan = planInstallAction('balanced', 'hold', { confirmed: false });
@@ -23,7 +28,7 @@ describe('install flow', () => {
   it('runs installer and returns failed outcome on command error', async () => {
     const plan = planInstallAction('balanced', 'hold', {
       confirmed: true,
-      overrideToken: '12345678901234567890',
+      overrideToken: makeCurrentOverrideToken(),
       overrideReason: 'manual approval'
     });
 
