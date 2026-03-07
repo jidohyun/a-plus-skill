@@ -38,10 +38,13 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetOverrideNonceCacheForTests();
+  delete process.env.NODE_ENV;
   delete process.env.INSTALL_OVERRIDE_MAX_TTL_SEC;
   delete process.env.INSTALL_OVERRIDE_CLOCK_SKEW_SEC;
   delete process.env.INSTALL_OVERRIDE_ALLOW_LEGACY;
   delete process.env.INSTALL_OVERRIDE_SIGNING_SECRET;
+  delete process.env.INSTALL_OVERRIDE_NONCE_STORE;
+  delete process.env.INSTALL_OVERRIDE_NONCE_DIR;
 });
 
 describe('policy', () => {
@@ -268,8 +271,9 @@ describe('policy', () => {
     expect(plan.action).toBe('override-install');
   });
 
-  it('allows legacy length-based token only when explicit flag is enabled', () => {
+  it('allows legacy length-based token in non-production when explicit flag is enabled', () => {
     const legacyToken = '12345678901234567890';
+    process.env.NODE_ENV = 'development';
 
     const disabled = planInstallAction('fast', 'hold', {
       confirmed: true,
@@ -286,5 +290,40 @@ describe('policy', () => {
     });
     expect(enabled.canInstall).toBe(true);
     expect(enabled.action).toBe('override-install');
+  });
+
+  it('blocks legacy override token in production even when explicit flag is enabled', () => {
+    const legacyToken = '12345678901234567890';
+    process.env.NODE_ENV = 'production';
+    process.env.INSTALL_OVERRIDE_ALLOW_LEGACY = 'true';
+
+    const blocked = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: legacyToken,
+      overrideReason: 'operator approved'
+    });
+
+    expect(blocked.canInstall).toBe(false);
+    expect(blocked.action).toBe('confirm-install');
+  });
+
+  it('enforces hard caps for ttl and skew even with oversized env values', () => {
+    process.env.INSTALL_OVERRIDE_MAX_TTL_SEC = '99999';
+    process.env.INSTALL_OVERRIDE_CLOCK_SKEW_SEC = '99999';
+
+    const now = Math.floor(Date.now() / 1000);
+    const token = makeOverrideToken({
+      iat: now - 100,
+      exp: now + 901,
+      nonce: 'AbCdEfGhIjKlMnOpQrStUvWX'
+    });
+
+    const plan = planInstallAction('fast', 'hold', {
+      confirmed: true,
+      overrideToken: token,
+      overrideReason: 'operator approved'
+    });
+
+    expect(plan.canInstall).toBe(false);
   });
 });

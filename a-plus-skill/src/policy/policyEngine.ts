@@ -1,7 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { getOverrideNonceStore, __resetOverrideNonceStoreForTests } from './overrideNonceStore.js';
 import type { InstallPlan, InstallPolicyContext, Policy, RecommendationResult } from '../types/index.js';
 
 const DECISION_HYSTERESIS_BAND = 1;
+const HARD_MAX_TTL_SEC = 900;
+const HARD_MAX_CLOCK_SKEW_SEC = 120;
 
 function applyConservativeHysteresis(score: number): number {
   let adjusted = score;
@@ -29,12 +32,16 @@ export function decide(policy: Policy, score: number, security: number): Recomme
   return 'hold';
 }
 
-function parsePositiveIntEnv(name: string, fallback: number): number {
+function parsePositiveIntEnv(name: string, fallback: number, max: number): number {
   const raw = process.env[name];
-  if (!raw) return fallback;
+  if (!raw) return Math.min(fallback, max);
 
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return Math.min(fallback, max);
+  }
+
+  return Math.min(parsed, max);
 }
 
 function isSimpleRepeatedPattern(value: string): boolean {
@@ -63,16 +70,6 @@ type ParsedOverrideToken = {
   nonce: string;
   sig: string;
 };
-
-const usedOverrideNonces = new Map<string, number>();
-
-function gcUsedNonces(nowSec: number): void {
-  for (const [nonce, exp] of usedOverrideNonces.entries()) {
-    if (exp < nowSec) {
-      usedOverrideNonces.delete(nonce);
-    }
-  }
-}
 
 function getOverrideSigningSecret(): string {
   return process.env.INSTALL_OVERRIDE_SIGNING_SECRET?.trim() ?? '';
@@ -110,10 +107,14 @@ function isValidSignedOverrideToken(parsed: ParsedOverrideToken): boolean {
 
   if (exp <= iat) return false;
 
-  const maxTtlSec = parsePositiveIntEnv('INSTALL_OVERRIDE_MAX_TTL_SEC', 900);
+  const maxTtlSec = parsePositiveIntEnv('INSTALL_OVERRIDE_MAX_TTL_SEC', HARD_MAX_TTL_SEC, HARD_MAX_TTL_SEC);
   if (exp - iat > maxTtlSec) return false;
 
-  const clockSkewSec = parsePositiveIntEnv('INSTALL_OVERRIDE_CLOCK_SKEW_SEC', 60);
+  const clockSkewSec = parsePositiveIntEnv(
+    'INSTALL_OVERRIDE_CLOCK_SKEW_SEC',
+    60,
+    HARD_MAX_CLOCK_SKEW_SEC
+  );
   const nowSec = Math.floor(Date.now() / 1000);
   if (nowSec < iat - clockSkewSec || nowSec > exp + clockSkewSec) return false;
 
@@ -125,15 +126,15 @@ function isValidSignedOverrideToken(parsed: ParsedOverrideToken): boolean {
   if (!secret) return false;
   if (!verifySignature(parsed, secret)) return false;
 
-  gcUsedNonces(nowSec);
-  if (usedOverrideNonces.has(nonce)) return false;
+  const nonceStore = getOverrideNonceStore();
+  nonceStore.gc(nowSec);
 
   return true;
 }
 
-function markOverrideTokenUsed(token: ParsedOverrideToken): void {
-  gcUsedNonces(Math.floor(Date.now() / 1000));
-  usedOverrideNonces.set(token.nonce, token.exp);
+function markOverrideTokenUsed(token: ParsedOverrideToken): boolean {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return getOverrideNonceStore().consume(token.nonce, token.exp, nowSec);
 }
 
 type OverrideValidationResult = {
@@ -145,7 +146,8 @@ function validateOverrideToken(v?: string): OverrideValidationResult {
   const token = v?.trim() ?? '';
   if (!token) return { valid: false, parsed: null };
 
-  const allowLegacy = process.env.INSTALL_OVERRIDE_ALLOW_LEGACY === 'true';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowLegacy = !isProduction && process.env.INSTALL_OVERRIDE_ALLOW_LEGACY === 'true';
   if (allowLegacy && isLegacyStrongToken(token)) {
     return { valid: true, parsed: null };
   }
@@ -163,7 +165,7 @@ function hasReason(v?: string): boolean {
 }
 
 export function __resetOverrideNonceCacheForTests(): void {
-  usedOverrideNonces.clear();
+  __resetOverrideNonceStoreForTests();
 }
 
 export function planInstallAction(
@@ -201,7 +203,19 @@ export function planInstallAction(
     const override = validateOverrideToken(context.overrideToken);
     const canOverride = override.valid && hasReason(context.overrideReason);
     if (canOverride && context.confirmed) {
-      if (override.parsed) markOverrideTokenUsed(override.parsed);
+      const consumed = override.parsed ? markOverrideTokenUsed(override.parsed) : true;
+      if (!consumed) {
+        notes.push('hold override rejected: nonce replay detected');
+        return {
+          policy,
+          originalDecision: decision,
+          effectiveDecision,
+          action: 'confirm-install',
+          canInstall: false,
+          notes
+        };
+      }
+
       notes.push('hold overridden with strong token + reason + confirmation');
       return {
         policy,
@@ -266,8 +280,21 @@ export function planInstallAction(
     );
 
     if (!nonceConflict && hasStrongOverride && hasReason(context.overrideReason) && context.confirmed) {
-      if (override.parsed) markOverrideTokenUsed(override.parsed);
-      if (strongOverride.parsed) markOverrideTokenUsed(strongOverride.parsed);
+      const overrideConsumed = override.parsed ? markOverrideTokenUsed(override.parsed) : true;
+      const strongConsumed = strongOverride.parsed ? markOverrideTokenUsed(strongOverride.parsed) : true;
+
+      if (!overrideConsumed || !strongConsumed) {
+        notes.push('balanced policy: block override rejected due to nonce replay');
+        return {
+          policy,
+          originalDecision: decision,
+          effectiveDecision,
+          action: 'confirm-install',
+          canInstall: false,
+          notes
+        };
+      }
+
       notes.push('balanced policy: block overridden with strong override tokens + reason + confirmation');
       return {
         policy,
@@ -293,7 +320,19 @@ export function planInstallAction(
   // fast policy
   const override = validateOverrideToken(context.overrideToken);
   if (override.valid && hasReason(context.overrideReason) && context.confirmed) {
-    if (override.parsed) markOverrideTokenUsed(override.parsed);
+    const consumed = override.parsed ? markOverrideTokenUsed(override.parsed) : true;
+    if (!consumed) {
+      notes.push('fast policy: block override rejected due to nonce replay');
+      return {
+        policy,
+        originalDecision: decision,
+        effectiveDecision,
+        action: 'confirm-install',
+        canInstall: false,
+        notes
+      };
+    }
+
     notes.push('fast policy: block overridden with strong token + reason + confirmation');
     return {
       policy,
