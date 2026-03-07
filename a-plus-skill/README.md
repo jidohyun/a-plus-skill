@@ -182,6 +182,28 @@ npm run collector:status -- --strict
 - `INSTALL_TIMEOUT_RECOVERY_DELAY_MS`: timeout/SIGKILL 직후 다음 항목 처리 전 회복 지연(ms)
   - 기본값: `250`
   - `0~2000` 범위로 클램프 (0이면 지연 비활성)
+- `INSTALL_AUDIT_LOG_PATH`: 설치 감사 이벤트 JSONL 경로(선택)
+  - 기본값: `data/install-events.jsonl`
+  - append-only로 기록되며, 디렉터리가 없으면 자동 생성
+
+#### 설치 감사 로그(JSONL)
+- 기본 파일: `data/install-events.jsonl`
+- 형식: 한 줄당 1개 JSON 이벤트(기계 판독 가능)
+- 기록 시점: 각 skill 설치 시도 종료 시점(단일 통합 이벤트: decision+plan+outcome)
+- 포함 필드(요약):
+  - `ts`, `slug`, `policy`, `topology`
+  - `originalDecision`, `effectiveDecision`
+  - `action`, `canInstall`, `status`
+  - `errorCode`, `timeoutMs`, `elapsedMs`
+  - `degraded`, `notes[]`
+- 이벤트는 `skip-install/confirm-install/auto-install/override-install` 모두 기록됩니다.
+- 로그 쓰기 실패는 설치 플로우를 중단하지 않고 경고만 남깁니다.
+- 보안: note/error의 `token/secret` 및 `ovr1...` override token 패턴은 마스킹되어 기록됩니다.
+
+예시:
+```json
+{"ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","errorCode":"INSTALL_RUNTIME_ERROR","degraded":false,"notes":["hold requires strong override token + reason + confirmation"]}
+```
 
 #### Override token 형식 (`ovr1`)
 - 포맷: `ovr1.<iat>.<exp>.<nonce>.<sig>`

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
-import type { InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
+import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
 
 export type InstallRunnerResult = {
   code: number | null;
@@ -15,6 +15,11 @@ export type InstallRunnerResult = {
 };
 
 export type InstallRunner = (slug: string) => Promise<InstallRunnerResult>;
+
+export type RunInstallOptions = {
+  topology?: InstallTopology;
+  degraded?: boolean;
+};
 
 const ALLOWED_BASE_COMMANDS = new Set(['openclaw']);
 const STRICT_SUBCOMMAND = ['skill', 'install'];
@@ -186,25 +191,90 @@ export function createDefaultRunner(deps: RunnerDeps = {}): InstallRunner {
   };
 }
 
-function writeAudit(plan: InstallPlan, slug: string): void {
-  if (plan.action !== 'override-install') return;
-  try {
-    const file = resolve(process.cwd(), 'data', 'install-audit.log');
-    mkdirSync(dirname(file), { recursive: true });
-    const line = `${new Date().toISOString()}\tslug=${slug}\tpolicy=${plan.policy}\taction=${plan.action}\toriginal=${plan.originalDecision}\teffective=${plan.effectiveDecision}\tnotes=${plan.notes.join('|')}\n`;
-    appendFileSync(file, line, 'utf8');
-  } catch {
-    // ignore audit write failures to avoid blocking runtime
+function sanitizeSensitiveText(raw: string): string {
+  return raw
+    .replace(/\bovr1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED_OVERRIDE_TOKEN]')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET)[A-Z0-9_]*)\s*=\s*([^\s,;]+)/gi, '$1=[REDACTED]')
+    .replace(/("(?:token|secret)"\s*:\s*")([^"]+)(")/gi, '$1[REDACTED]$3')
+    .replace(/('(?:token|secret)'\s*:\s*')([^']+)(')/gi, '$1[REDACTED]$3');
+}
+
+function sanitizeNotes(notes: string[]): string[] {
+  return notes.map((note) => sanitizeSensitiveText(note));
+}
+
+function classifyErrorCode(outcome: InstallOutcome): string | undefined {
+  if (!outcome.error) {
+    if (outcome.status === 'failed' && outcome.code && outcome.code !== 0) {
+      return 'INSTALL_COMMAND_FAILED';
+    }
+    return undefined;
   }
+
+  if (outcome.error === 'timeout') return 'INSTALL_TIMEOUT';
+  if (outcome.error.includes('invalid slug format')) return 'INVALID_SLUG';
+  if (outcome.error.includes('disallowed install')) return 'INSTALL_COMMAND_REJECTED';
+  return 'INSTALL_RUNTIME_ERROR';
+}
+
+function getInstallAuditPath(): string {
+  const rawPath = process.env.INSTALL_AUDIT_LOG_PATH?.trim();
+  if (rawPath) {
+    return resolve(process.cwd(), rawPath);
+  }
+  return resolve(process.cwd(), 'data', 'install-events.jsonl');
+}
+
+export function writeInstallAuditEvent(event: InstallAuditEvent): void {
+  try {
+    const file = getInstallAuditPath();
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[install-audit] failed to append JSONL event: ${sanitizeSensitiveText(reason)}`);
+  }
+}
+
+function emitInstallAuditEvent(
+  slug: string,
+  plan: InstallPlan,
+  outcome: InstallOutcome,
+  options: RunInstallOptions = {}
+): void {
+  const topology = options.topology ?? loadInstallTopologyFromEnv('single-instance');
+  const degraded = options.degraded ?? plan.notes.some((note) => note.includes('degraded mode'));
+
+  const event: InstallAuditEvent = {
+    ts: new Date().toISOString(),
+    slug,
+    policy: plan.policy,
+    topology,
+    originalDecision: plan.originalDecision,
+    effectiveDecision: plan.effectiveDecision,
+    action: plan.action,
+    canInstall: plan.canInstall,
+    status: outcome.status,
+    errorCode: classifyErrorCode(outcome),
+    timeoutMs: outcome.timeoutMs,
+    elapsedMs: outcome.elapsedMs,
+    degraded,
+    notes: sanitizeNotes(plan.notes)
+  };
+
+  writeInstallAuditEvent(event);
 }
 
 export async function runInstall(
   slug: string,
   plan: InstallPlan,
-  runner: InstallRunner = createDefaultRunner()
+  runner: InstallRunner = createDefaultRunner(),
+  options: RunInstallOptions = {}
 ): Promise<InstallOutcome> {
+  const commandPreview = `${process.env.OPENCLAW_INSTALL_COMMAND ?? 'openclaw skill install'} -- ${slug}`;
+
   if (!plan.canInstall) {
-    return {
+    const skipped: InstallOutcome = {
       slug,
       action: plan.action,
       attempted: false,
@@ -212,11 +282,13 @@ export async function runInstall(
       status: 'skipped',
       error: plan.notes.join('; ')
     };
+    emitInstallAuditEvent(slug, plan, skipped, options);
+    return skipped;
   }
 
   const slugError = validateSlug(slug);
   if (slugError) {
-    return {
+    const invalidSlug: InstallOutcome = {
       slug,
       action: plan.action,
       attempted: false,
@@ -224,39 +296,43 @@ export async function runInstall(
       status: 'failed',
       error: slugError
     };
+    emitInstallAuditEvent(slug, plan, invalidSlug, options);
+    return invalidSlug;
   }
 
-  const commandPreview = `${process.env.OPENCLAW_INSTALL_COMMAND ?? 'openclaw skill install'} -- ${slug}`;
-  writeAudit(plan, slug);
   try {
     const run = await runner(slug);
     const success = run.code === 0 && !run.error;
 
-    return {
+    const outcome: InstallOutcome = {
       slug,
       action: plan.action,
       attempted: true,
       installed: success,
       status: success ? 'installed' : 'failed',
-      command: commandPreview,
+      command: sanitizeSensitiveText(commandPreview),
       code: run.code,
       signal: run.signal,
       stdout: run.stdout,
       stderr: run.stderr,
-      error: run.error,
+      error: run.error ? sanitizeSensitiveText(run.error) : undefined,
       elapsedMs: run.elapsedMs,
       timeoutMs: run.timeoutMs
     };
+    emitInstallAuditEvent(slug, plan, outcome, options);
+    return outcome;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return {
+    const reason = sanitizeSensitiveText(error instanceof Error ? error.message : String(error));
+    const failed: InstallOutcome = {
       slug,
       action: plan.action,
       attempted: false,
       installed: false,
       status: 'failed',
-      command: commandPreview,
+      command: sanitizeSensitiveText(commandPreview),
       error: reason
     };
+    emitInstallAuditEvent(slug, plan, failed, options);
+    return failed;
   }
 }

@@ -102,7 +102,10 @@ export async function main() {
     }
     reasons.push(...installPlan.notes);
 
-    const installOutcome = await runInstall(s.slug, installPlan);
+    const installOutcome = await runInstall(s.slug, installPlan, undefined, {
+      topology,
+      degraded: meta.degraded
+    });
 
     results.push({
       slug: s.slug,

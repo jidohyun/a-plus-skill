@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,6 +54,7 @@ afterEach(() => {
   delete process.env.INSTALL_OVERRIDE_SIGNING_SECRET;
   delete process.env.INSTALL_COMMAND_TIMEOUT_MS;
   delete process.env.INSTALL_TIMEOUT_RECOVERY_DELAY_MS;
+  delete process.env.INSTALL_AUDIT_LOG_PATH;
 });
 
 describe('install flow', () => {
@@ -278,5 +282,110 @@ describe('install flow', () => {
     expect(parseInstallTimeoutRecoveryDelayMs('999999')).toBe(2000);
     expect(parseInstallTimeoutRecoveryDelayMs('-1')).toBe(250);
     expect(parseInstallTimeoutRecoveryDelayMs('0')).toBe(0);
+  });
+
+  it('writes audit event for canInstall=false path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'hold', { confirmed: false });
+    const outcome = await runInstall('demo/skill', plan);
+
+    expect(outcome.status).toBe('skipped');
+
+    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const event = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
+
+    expect(event.action).toBe('confirm-install');
+    expect(event.canInstall).toBe(false);
+    expect(event.status).toBe('skipped');
+  });
+
+  it('writes success/failure/timeout audit fields', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+
+    await runInstall('demo/success', plan, async () => ({ code: 0, stdout: 'ok', stderr: '', elapsedMs: 120, timeoutMs: 1000 }));
+    await runInstall('demo/failure', plan, async () => ({ code: 1, stdout: '', stderr: 'fail', elapsedMs: 90, timeoutMs: 1000 }));
+    await runInstall('demo/timeout', plan, async () => ({
+      code: null,
+      signal: 'SIGKILL',
+      stdout: '',
+      stderr: 'timeout exceeded',
+      error: 'timeout',
+      elapsedMs: 1500,
+      timeoutMs: 1000
+    }));
+
+    const events = readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(events[0]?.status).toBe('installed');
+    expect(events[1]?.status).toBe('failed');
+    expect(events[1]?.errorCode).toBe('INSTALL_COMMAND_FAILED');
+    expect(events[2]?.status).toBe('failed');
+    expect(events[2]?.errorCode).toBe('INSTALL_TIMEOUT');
+    expect(events[2]?.elapsedMs).toBe(1500);
+    expect(events[2]?.timeoutMs).toBe(1000);
+  });
+
+  it('records degraded hold in audit event', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('fast', 'recommend', {
+      degraded: true,
+      confirmed: true,
+      overrideToken: 'ok'
+    });
+
+    await runInstall('demo/skill', plan, undefined, { degraded: true, topology: 'single-instance' });
+
+    const event = JSON.parse(readFileSync(logPath, 'utf8').trim()) as Record<string, unknown>;
+    expect(event.degraded).toBe(true);
+    expect(event.effectiveDecision).toBe('hold');
+    expect(event.status).toBe('skipped');
+  });
+
+  it('masks override token from audit notes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const token = makeCurrentOverrideToken();
+    const plan = {
+      ...planInstallAction('balanced', 'recommend', {}),
+      notes: [`override token seen: ${token}`]
+    };
+
+    await runInstall('demo/skill', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    const raw = readFileSync(logPath, 'utf8');
+    expect(raw).not.toContain(token);
+    expect(raw).toContain('[REDACTED_OVERRIDE_TOKEN]');
+  });
+
+  it('continues install flow when audit log write fails', async () => {
+    process.env.INSTALL_AUDIT_LOG_PATH = '/dev/full/install-events.jsonl';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    const outcome = await runInstall('demo/skill', plan, async () => ({
+      code: 0,
+      stdout: 'installed',
+      stderr: ''
+    }));
+
+    expect(outcome.status).toBe('installed');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

@@ -65,6 +65,23 @@ export type InstallOutcome = {
   timeoutMs?: number;
 };
 
+export type InstallAuditEvent = {
+  ts: string;
+  slug: string;
+  policy: Policy;
+  topology: InstallTopology;
+  originalDecision: RecommendationResult['decision'];
+  effectiveDecision: RecommendationResult['decision'];
+  action: InstallAction;
+  canInstall: boolean;
+  status: InstallOutcome['status'];
+  errorCode?: string;
+  timeoutMs?: number;
+  elapsedMs?: number;
+  degraded: boolean;
+  notes: string[];
+};
+
 export type RecommendationResult = {
   slug: string;
   fitScore: number;
