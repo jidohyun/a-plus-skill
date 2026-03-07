@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MIN_PARSED_SKILLS,
+  MAX_MIN_PARSED_SKILLS,
   fetchCandidateSkills,
   MOCK_SKILLS,
   parseSkillsFromHtml
@@ -108,6 +109,19 @@ describe('collector', () => {
     expect(requestedUrl).toBe(customUrl);
   });
 
+  it('uses default URL when CLAWHUB_BASE_URL protocol is not https', async () => {
+    withEnv('CLAWHUB_BASE_URL', 'http://clawhub.ai/skills?nonSuspicious=true');
+
+    let requestedUrl = '';
+    const okFetch: typeof fetch = async (input) => {
+      requestedUrl = String(input);
+      return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    };
+
+    await fetchCandidateSkills(okFetch);
+    expect(requestedUrl).toBe(DEFAULT_CLAWHUB_SKILLS_URL);
+  });
+
   it('uses MIN_PARSED_SKILLS env: 1 keeps live, 5 triggers fallback', async () => {
     const oneSkillHtml = `<html><body><script>{"skills":[{"slug":"one/skill","name":"one","downloads":10}]}</script></body></html>`;
     const okFetch: typeof fetch = async () =>
@@ -141,5 +155,18 @@ describe('collector', () => {
     expect(DEFAULT_MIN_PARSED_SKILLS).toBe(3);
     expect(result.meta.source).toBe('fallback');
     expect(result.meta.fallbackReason).toContain('PARSE_BELOW_THRESHOLD_2');
+  });
+
+  it('clamps overly large MIN_PARSED_SKILLS to MAX_MIN_PARSED_SKILLS', async () => {
+    const oneSkillHtml = `<html><body><script>{"skills":[{"slug":"one/skill","name":"one","downloads":10}]}</script></body></html>`;
+    const okFetch: typeof fetch = async () =>
+      new Response(oneSkillHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+
+    withEnv('MIN_PARSED_SKILLS', '9999');
+    const result = await fetchCandidateSkills(okFetch);
+
+    expect(MAX_MIN_PARSED_SKILLS).toBe(50);
+    expect(result.meta.source).toBe('fallback');
+    expect(result.meta.fallbackReason).toContain('PARSE_BELOW_THRESHOLD_1');
   });
 });

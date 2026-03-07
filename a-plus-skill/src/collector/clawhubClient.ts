@@ -3,6 +3,7 @@ import type { CollectorResult, SkillMeta } from '../types/index.js';
 const DEFAULT_CLAWHUB_SKILLS_URL = 'https://clawhub.ai/skills?nonSuspicious=true';
 const ALLOWED_HOSTS = new Set(['clawhub.ai', 'www.clawhub.ai', 'clawhub.org', 'www.clawhub.org']);
 export const DEFAULT_MIN_PARSED_SKILLS = 3;
+export const MAX_MIN_PARSED_SKILLS = 50;
 
 type FetchLike = typeof fetch;
 
@@ -44,6 +45,11 @@ function resolveSkillsUrl(): string {
     return DEFAULT_CLAWHUB_SKILLS_URL;
   }
 
+  if (parsed.protocol !== 'https:') {
+    console.warn(`[collector] Disallowed ClawHub protocol: ${parsed.protocol}. Falling back to default URL.`);
+    return DEFAULT_CLAWHUB_SKILLS_URL;
+  }
+
   if (!ALLOWED_HOSTS.has(parsed.hostname)) {
     console.warn(`[collector] Disallowed ClawHub host: ${parsed.hostname}. Falling back to default host.`);
     return DEFAULT_CLAWHUB_SKILLS_URL;
@@ -67,7 +73,7 @@ export function resolveMinParsedSkills(): number {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_MIN_PARSED_SKILLS;
 
-  return parsed;
+  return Math.min(parsed, MAX_MIN_PARSED_SKILLS);
 }
 
 function asNumber(value: unknown): number {
