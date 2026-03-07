@@ -10,6 +10,7 @@ const MAX_RETRY_AFTER_MS = 60_000;
 const DELIVERY_LOG_PATH = resolve(process.cwd(), 'data/report-delivery.log');
 const DELIVERY_LOG_ROTATED_PATH = `${DELIVERY_LOG_PATH}.1`;
 const DEFAULT_DELIVERY_LOG_MAX_BYTES = 1_048_576;
+const DEFAULT_INLINE_ROTATE_ENABLED = false;
 const MAX_MESSAGE_LENGTH: Record<Exclude<ReportDeliveryMode, 'none'>, number> = {
   'discord-dm': 1900,
   telegram: 4000
@@ -129,10 +130,18 @@ async function rotateDeliveryLogIfNeeded(maxBytes: number): Promise<void> {
   }
 }
 
+function isInlineRotateEnabled(): boolean {
+  const raw = (process.env.REPORT_DELIVERY_INLINE_ROTATE ?? '').trim().toLowerCase();
+  if (!raw) return DEFAULT_INLINE_ROTATE_ENABLED;
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 async function logFailure(message: string): Promise<void> {
   try {
     await mkdir(dirname(DELIVERY_LOG_PATH), { recursive: true });
-    await rotateDeliveryLogIfNeeded(getDeliveryLogMaxBytes());
+    if (isInlineRotateEnabled()) {
+      await rotateDeliveryLogIfNeeded(getDeliveryLogMaxBytes());
+    }
     await appendFile(DELIVERY_LOG_PATH, `${new Date().toISOString()} ${message}\n`, 'utf8');
   } catch {
     // do not fail delivery flow due to logging failure
@@ -170,15 +179,21 @@ function sanitizeMode(raw: string): string {
 function enforceModeLock(
   resolved: ReportDeliveryMode | 'unsupported',
   rawMode: string
-): { mode: ReportDeliveryMode | 'unsupported'; lockMismatch: boolean } {
+): { mode: ReportDeliveryMode | 'unsupported'; lockMismatch: boolean; expectedMode?: Exclude<ReportDeliveryMode, 'none'> } {
   const locked = (process.env.REPORT_DELIVERY_LOCKED ?? '').trim().toLowerCase();
   if (!locked) return { mode: resolved, lockMismatch: false };
 
+  if (resolved === 'unsupported') {
+    return { mode: resolved, lockMismatch: false };
+  }
+
   const lockedMode = resolveMode(locked);
-  if (lockedMode === 'unsupported') return { mode: 'unsupported', lockMismatch: false };
+  if (lockedMode === 'unsupported' || lockedMode === 'none') {
+    return { mode: 'unsupported', lockMismatch: false };
+  }
 
   if (rawMode !== lockedMode) {
-    return { mode: 'unsupported', lockMismatch: true };
+    return { mode: 'unsupported', lockMismatch: true, expectedMode: lockedMode };
   }
 
   return { mode: resolved, lockMismatch: false };
@@ -196,7 +211,7 @@ export async function sendWeeklyReport(
   deps?: { sender?: SenderFn; sleepFn?: SleepFn }
 ): Promise<ReportDeliveryResult> {
   const rawMode = (process.env.REPORT_DELIVERY ?? 'none').trim().toLowerCase();
-  const { mode, lockMismatch } = enforceModeLock(resolveMode(rawMode), rawMode);
+  const { mode, lockMismatch, expectedMode } = enforceModeLock(resolveMode(rawMode), rawMode);
 
   if (mode === 'none') {
     return { skipped: true, mode: 'none', chunksAttempted: 0, chunksSent: 0 };
@@ -205,7 +220,9 @@ export async function sendWeeklyReport(
   if (mode === 'unsupported') {
     if (lockMismatch) {
       const reason = 'lock_mismatch';
-      await logFailure(`event=lock_mismatch mode=${sanitizeMode(rawMode)}`);
+      await logFailure(
+        `event=lock_mismatch expected=${sanitizeMode(expectedMode ?? 'unknown')} actual=${sanitizeMode(rawMode)}`
+      );
       return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
     }
 

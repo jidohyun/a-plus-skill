@@ -33,8 +33,9 @@ npm run dev
 ## 리포트 전송 설정 (Discord DM / Telegram)
 - `REPORT_DELIVERY`: `none | discord-dm | telegram` (기본 `none`)
 - `REPORT_DELIVERY_LOCKED` (선택): `discord-dm` 또는 `telegram`으로 고정. 잠금값과 다르면 전송을 스킵하며 reason=`lock_mismatch`로 기록합니다.
-- `REPORT_DELIVERY_LOG_MAX_BYTES` (선택, 기본 `1048576`): `data/report-delivery.log` 최대 크기. 초과 시 기존 로그를 `data/report-delivery.log.1`로 로테이션합니다.
 - `REPORT_DELIVERY_FAIL_HARD` (선택, 기본 `true`): 전송 실패 시 프로세스를 실패(exit != 0)로 처리
+- `REPORT_DELIVERY_INLINE_ROTATE` (선택, 기본 `false`): 인프로세스 로그 로테이션 사용 여부. 기본은 **append-only**이며, 운영 환경에서는 외부 `logrotate`/시스템 로거 위임을 권장합니다.
+- `REPORT_DELIVERY_LOG_MAX_BYTES` (선택, 기본 `1048576`): `REPORT_DELIVERY_INLINE_ROTATE=true`일 때만 적용되는 인프로세스 로테이션 임계치
 - Discord DM
   - `DISCORD_BOT_TOKEN`: Discord Bot 토큰 (`Bot <token>` 인증에 사용)
   - `DISCORD_DM_USER_ID`: DM 수신 대상 Discord user id
@@ -70,8 +71,10 @@ REPORT_DELIVERY=telegram npm run report:send
 ```
 
 ## 전송 실패 로그
-- 경로: `data/report-delivery.log` (로테이션: `data/report-delivery.log.1`)
-- 기록 내용: event/chunk 번호/시도 횟수/code/status
+- 기본 경로: `data/report-delivery.log` (기본 정책: append-only)
+- 권장 운영: 외부 `logrotate` 또는 시스템 로거(journald 등)로 순환 관리
+- 선택적 인프로세스 로테이션(비기본): `REPORT_DELIVERY_INLINE_ROTATE=true`일 때만 `data/report-delivery.log.1` 사용
+- 기록 내용: event/chunk 번호/시도 횟수/code/status (lock_mismatch는 `expected`/`actual` 포함)
 - 주요 reason
   - `lock_mismatch`: `REPORT_DELIVERY`가 `REPORT_DELIVERY_LOCKED`와 불일치
   - `unsupported REPORT_DELIVERY mode`: 지원하지 않는 전송 모드

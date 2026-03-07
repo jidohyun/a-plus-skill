@@ -241,12 +241,36 @@ describe('report delivery', () => {
       sleepFn: async () => {}
     });
 
+    const current = await readFile(deliveryLogPath, 'utf8');
+
     expect(result.skipped).toBe(true);
     expect(result.reason).toBe('lock_mismatch');
+    expect(current).toContain('event=lock_mismatch');
+    expect(current).toContain('expected=discord-dm');
+    expect(current).toContain('actual=telegram');
     expect(called).toBe(0);
   });
 
-  it('rotates delivery failure log when max bytes threshold is reached', async () => {
+  it('keeps unsupported mode reason when raw mode is unsupported even with lock configured', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'smtp');
+    vi.stubEnv('REPORT_DELIVERY_LOCKED', 'discord-dm');
+
+    const result = await sendWeeklyReport('report', undefined, {
+      sender: async () => {
+        throw new Error('should not run');
+      },
+      sleepFn: async () => {}
+    });
+
+    const current = await readFile(deliveryLogPath, 'utf8');
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('unsupported REPORT_DELIVERY mode');
+    expect(current).toContain('event=unsupported_mode');
+    expect(current).not.toContain('event=lock_mismatch');
+  });
+
+  it('does not inline-rotate delivery failure log by default (append-only)', async () => {
     vi.stubEnv('REPORT_DELIVERY', 'smtp');
     vi.stubEnv('REPORT_DELIVERY_LOG_MAX_BYTES', '64');
 
@@ -259,12 +283,32 @@ describe('report delivery', () => {
       sleepFn: async () => {}
     });
 
+    const current = await readFile(deliveryLogPath, 'utf8');
+
+    await expect(stat(deliveryLogRotatedPath)).rejects.toThrow();
+    expect(current.startsWith('x'.repeat(64))).toBe(true);
+    expect(current).toContain('event=unsupported_mode');
+  });
+
+  it('rotates delivery failure log when inline rotate flag is enabled', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'smtp');
+    vi.stubEnv('REPORT_DELIVERY_LOG_MAX_BYTES', '64');
+    vi.stubEnv('REPORT_DELIVERY_INLINE_ROTATE', 'true');
+
+    await writeFile(deliveryLogPath, 'x'.repeat(64), 'utf8');
+
+    await sendWeeklyReport('report', undefined, {
+      sender: async () => {
+        throw new Error('should not run');
+      },
+      sleepFn: async () => {}
+    });
+
     const rotated = await readFile(deliveryLogRotatedPath, 'utf8');
     const current = await readFile(deliveryLogPath, 'utf8');
-    const currentStat = await stat(deliveryLogPath);
 
     expect(rotated).toBe('x'.repeat(64));
     expect(current).toContain('event=unsupported_mode');
-    expect(currentStat.size).toBeGreaterThan(0);
+    expect(current.length).toBeGreaterThan(0);
   });
 });

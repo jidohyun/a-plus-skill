@@ -58,6 +58,13 @@ function printCounter(title, map) {
   }
 }
 
+function eventCategory(event) {
+  if (event === 'lock_mismatch' || event === 'unsupported_mode') {
+    return 'skip';
+  }
+  return 'failure';
+}
+
 async function main() {
   const hours = parseHours(process.argv.slice(2));
   const threshold = Date.now() - hours * 60 * 60 * 1000;
@@ -76,17 +83,23 @@ async function main() {
     .sort((a, b) => b.timestamp - a.timestamp);
 
   const eventCounts = new Map();
+  const categoryCounts = new Map();
   const codeCounts = new Map();
   const statusCounts = new Map();
 
   for (const rec of records) {
-    increment(eventCounts, rec.fields.event ?? 'unknown');
+    const event = rec.fields.event ?? 'unknown';
+    increment(eventCounts, event);
+    increment(categoryCounts, eventCategory(event));
     if (rec.fields.code) increment(codeCounts, rec.fields.code);
     if (rec.fields.status) increment(statusCounts, rec.fields.status);
   }
 
   console.log(`Delivery failures summary (last ${hours}h)`);
   console.log(`- records: ${records.length}`);
+  console.log(`- failures: ${categoryCounts.get('failure') ?? 0}`);
+  console.log(`- skips: ${categoryCounts.get('skip') ?? 0}`);
+  printCounter('by category', categoryCounts);
   printCounter('by event', eventCounts);
   printCounter('by code', codeCounts);
   printCounter('by status', statusCounts);
