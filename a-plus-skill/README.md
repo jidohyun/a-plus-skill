@@ -222,6 +222,11 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
 - 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`
+- 런타임 설치 경로 연동 게이트(설치 루프 시작 전 자동 검증):
+  - `strict`: 무결성 실패 시 즉시 fail-fast (설치 중단)
+  - `balanced`: 설치 action을 `skip-install`로 강등하고 `notes`에 사유(line/reason) 기록
+  - `fast`: 경고만 기록하고 설치 계속 진행 (`notes`에 `audit_integrity=failed` 포함)
+- 가시성: install audit event의 `notes`에 `audit_integrity=ok|failed`, 실패 시 `audit_integrity_reason`, `audit_integrity_line` 기록
   - `hash mismatch`: 특정 라인 내용이 변조되었을 가능성
   - `prevHash mismatch`: 중간 라인 삭제/누락으로 체인이 단절되었을 가능성
   - `malformed JSON`: 파일 깨짐 또는 수동 편집 오류

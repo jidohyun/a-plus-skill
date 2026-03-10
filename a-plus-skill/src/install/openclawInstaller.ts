@@ -1,8 +1,14 @@
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
+import {
+  INSTALL_AUDIT_GENESIS_PREV_HASH,
+  INSTALL_AUDIT_SCHEMA_VERSION,
+  computeInstallAuditHash,
+  getInstallAuditPath
+} from './auditIntegrity.js';
 import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
 
 export type InstallRunnerResult = {
@@ -222,16 +228,6 @@ function classifyErrorCode(outcome: InstallOutcome): string | undefined {
   return 'INSTALL_RUNTIME_ERROR';
 }
 
-function getInstallAuditPath(): string {
-  const rawPath = process.env.INSTALL_AUDIT_LOG_PATH?.trim();
-  if (rawPath) {
-    return resolve(process.cwd(), rawPath);
-  }
-  return resolve(process.cwd(), 'data', 'install-events.jsonl');
-}
-
-const INSTALL_AUDIT_SCHEMA_VERSION = 1;
-const GENESIS_PREV_HASH = 'genesis';
 const INSTALL_AUDIT_LOCK_SUFFIX = '.lock';
 const INSTALL_AUDIT_LOCK_TIMEOUT_MS = 1_000;
 const INSTALL_AUDIT_LOCK_BACKOFF_MS = 10;
@@ -337,26 +333,6 @@ function acquireInstallAuditLock(file: string): () => void {
   throw new Error(`install audit lock timeout after ${INSTALL_AUDIT_LOCK_TIMEOUT_MS}ms`);
 }
 
-function canonicalStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalStringify(item)).join(',')}]`;
-  }
-
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort();
-    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(',')}}`;
-  }
-
-  return JSON.stringify(value);
-}
-
-function computeAuditHash(payload: InstallAuditPayload): string {
-  return createHash('sha256').update(canonicalStringify(payload), 'utf8').digest('hex');
-}
-
 function readPreviousAuditHash(file: string): string {
   try {
     const raw = readFileSync(file, 'utf8');
@@ -375,7 +351,7 @@ function readPreviousAuditHash(file: string): string {
     // no-op: missing file/invalid JSON falls back to genesis
   }
 
-  return GENESIS_PREV_HASH;
+  return INSTALL_AUDIT_GENESIS_PREV_HASH;
 }
 
 export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | 'prevHash' | 'eventId' | 'schemaVersion'>): void {
@@ -395,7 +371,7 @@ export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | '
     };
     const signedEvent: InstallAuditEvent = {
       ...payload,
-      hash: computeAuditHash(payload)
+      hash: computeInstallAuditHash(payload)
     };
 
     appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');

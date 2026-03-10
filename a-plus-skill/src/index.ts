@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { fetchCandidateSkills } from './collector/clawhubClient.js';
 import { loadInstallPolicyContextFromEnv, loadInstallTopologyFromEnv, loadPolicyFromEnv } from './install/confirm.js';
 import { runInstall } from './install/openclawInstaller.js';
+import { getInstallAuditPath, verifyInstallAuditFile } from './install/auditIntegrity.js';
+import type { InstallAuditVerifyResult } from './install/auditIntegrity.js';
 import { decide, planInstallAction } from './policy/policyEngine.js';
 import { validateOverrideSecurityPosture } from './policy/overrideNonceStore.js';
 import { buildReasons } from './recommender/explain.js';
@@ -16,7 +18,7 @@ import {
 import { renderWeeklyReport } from './report/weeklyReport.js';
 import { sendWeeklyReport } from './delivery/reportSender.js';
 import { securityScore } from './security/riskScoring.js';
-import type { InstallOutcome, ProfileConfig, RecommendationResult } from './types/index.js';
+import type { InstallOutcome, InstallPlan, Policy, ProfileConfig, RecommendationResult } from './types/index.js';
 import { getSafeDefaultProfile, normalizeRegistry, resolveProfile } from './profile/normalize.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +68,63 @@ export async function waitForInstallTimeoutRecovery(
   return delayMs;
 }
 
+export function toAuditIntegrityNotes(result: InstallAuditVerifyResult): string[] {
+  if (result.ok) {
+    return ['audit_integrity=ok'];
+  }
+
+  return [
+    'audit_integrity=failed',
+    `audit_integrity_reason=${result.reason}`,
+    `audit_integrity_line=${result.line}`
+  ];
+}
+
+export function applyAuditIntegrityGate(policy: Policy, installPlan: InstallPlan, auditIntegrity: InstallAuditVerifyResult): InstallPlan {
+  const auditIntegrityNotes = toAuditIntegrityNotes(auditIntegrity);
+
+  if (auditIntegrity.ok) {
+    return {
+      ...installPlan,
+      notes: [...installPlan.notes, ...auditIntegrityNotes]
+    };
+  }
+
+  if (policy === 'balanced') {
+    return {
+      ...installPlan,
+      action: 'skip-install',
+      canInstall: false,
+      notes: [
+        ...installPlan.notes,
+        'audit integrity gate: balanced policy demoted this run to skip-install',
+        `audit integrity failure line=${auditIntegrity.line} reason=${auditIntegrity.reason}`,
+        ...auditIntegrityNotes
+      ]
+    };
+  }
+
+  return {
+    ...installPlan,
+    notes: [...installPlan.notes, ...auditIntegrityNotes]
+  };
+}
+
+export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: InstallAuditVerifyResult, auditPath: string): void {
+  if (auditIntegrity.ok) return;
+
+  const gateMessage = `install audit integrity check failed (path=${auditPath}, line=${auditIntegrity.line}, reason=${auditIntegrity.reason})`;
+  if (policy === 'strict') {
+    throw new Error(`[strict] ${gateMessage}`);
+  }
+
+  if (policy === 'balanced') {
+    console.warn(`[balanced] ${gateMessage}; demoting all installs to skip-install`);
+  } else {
+    console.warn(`[fast] ${gateMessage}; proceeding with warning`);
+  }
+}
+
 export async function main() {
   const profile = await loadProfile();
   const { skills, meta } = await fetchCandidateSkills();
@@ -74,6 +133,9 @@ export async function main() {
   validateOverrideSecurityPosture({ topology, policy });
 
   const installContext = loadInstallPolicyContextFromEnv();
+  const auditPath = getInstallAuditPath();
+  const auditIntegrity = verifyInstallAuditFile(auditPath);
+  enforceAuditIntegrityPolicy(policy, auditIntegrity, auditPath);
 
   const results: RecommendationResult[] = [];
 
@@ -91,10 +153,12 @@ export async function main() {
     });
 
     const policyDecision = decide(policy, finalScore, security);
-    const installPlan = planInstallAction(policy, policyDecision, {
+    const installPlanBase = planInstallAction(policy, policyDecision, {
       ...installContext,
       degraded: meta.degraded
     });
+
+    const installPlan = applyAuditIntegrityGate(policy, installPlanBase, auditIntegrity);
 
     const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
     if (meta.degraded) {
