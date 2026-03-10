@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
 import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
@@ -235,8 +235,52 @@ const GENESIS_PREV_HASH = 'genesis';
 const INSTALL_AUDIT_LOCK_SUFFIX = '.lock';
 const INSTALL_AUDIT_LOCK_TIMEOUT_MS = 1_000;
 const INSTALL_AUDIT_LOCK_BACKOFF_MS = 10;
+const DEFAULT_INSTALL_AUDIT_STALE_LOCK_MS = 60_000;
+const MIN_INSTALL_AUDIT_STALE_LOCK_MS = 30_000;
+const MAX_INSTALL_AUDIT_STALE_LOCK_MS = 120_000;
 
 type InstallAuditPayload = Omit<InstallAuditEvent, 'hash'>;
+
+type InstallAuditLockMeta = {
+  pid: number;
+  createdAt: string;
+};
+
+function parseInstallAuditStaleLockMs(raw = process.env.INSTALL_AUDIT_STALE_LOCK_MS): number {
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_INSTALL_AUDIT_STALE_LOCK_MS;
+  }
+
+  const rounded = Math.floor(parsed);
+  return Math.max(MIN_INSTALL_AUDIT_STALE_LOCK_MS, Math.min(MAX_INSTALL_AUDIT_STALE_LOCK_MS, rounded));
+}
+
+function readInstallAuditLockCreatedAtMs(lockPath: string): number | undefined {
+  try {
+    const raw = readFileSync(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<InstallAuditLockMeta>;
+    const createdAtMs = Date.parse(String(parsed.createdAt ?? ''));
+    if (Number.isFinite(createdAtMs)) {
+      return createdAtMs;
+    }
+  } catch {
+    // no-op
+  }
+
+  return undefined;
+}
+
+function isInstallAuditLockStale(lockPath: string, staleLockMs: number, nowMs = Date.now()): boolean {
+  try {
+    const stats = statSync(lockPath);
+    const createdAtMs = readInstallAuditLockCreatedAtMs(lockPath);
+    const lockAgeMs = nowMs - Math.max(stats.mtimeMs, createdAtMs ?? 0);
+    return lockAgeMs >= staleLockMs;
+  } catch {
+    return false;
+  }
+}
 
 function blockForMs(ms: number): void {
   const until = Date.now() + ms;
@@ -248,10 +292,17 @@ function blockForMs(ms: number): void {
 function acquireInstallAuditLock(file: string): () => void {
   const lockPath = `${file}${INSTALL_AUDIT_LOCK_SUFFIX}`;
   const deadline = Date.now() + INSTALL_AUDIT_LOCK_TIMEOUT_MS;
+  const staleLockMs = parseInstallAuditStaleLockMs();
 
   while (Date.now() <= deadline) {
     try {
       const fd = openSync(lockPath, 'wx');
+      const lockMeta: InstallAuditLockMeta = {
+        pid: process.pid,
+        createdAt: new Date().toISOString()
+      };
+      writeSync(fd, JSON.stringify(lockMeta), undefined, 'utf8');
+
       return () => {
         try {
           closeSync(fd);
@@ -269,6 +320,16 @@ function acquireInstallAuditLock(file: string): () => void {
       if (code !== 'EEXIST') {
         throw error;
       }
+
+      if (isInstallAuditLockStale(lockPath, staleLockMs)) {
+        try {
+          unlinkSync(lockPath);
+          continue;
+        } catch {
+          // lock may be concurrently released/replaced; fall through to retry with backoff
+        }
+      }
+
       blockForMs(INSTALL_AUDIT_LOCK_BACKOFF_MS);
     }
   }

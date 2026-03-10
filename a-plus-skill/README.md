@@ -185,6 +185,10 @@ npm run collector:status -- --strict
 - `INSTALL_AUDIT_LOG_PATH`: 설치 감사 이벤트 JSONL 경로(선택)
   - 기본값: `data/install-events.jsonl`
   - append-only로 기록되며, 디렉터리가 없으면 자동 생성
+- `INSTALL_AUDIT_STALE_LOCK_MS`: 감사 로그 `.lock` stale 판정 기준(ms)
+  - 기본값: `60000`
+  - `30000~120000` 범위로 클램프
+  - stale lock 감지 시 자동으로 lock 파일을 제거하고 즉시 재시도
 
 #### 설치 감사 로그(JSONL)
 - 기본 파일: `data/install-events.jsonl`

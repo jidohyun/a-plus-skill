@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
@@ -535,6 +535,55 @@ describe('install flow', () => {
     const result = runAuditVerify(logPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('OK verified=8');
+  });
+
+  it('recovers from stale audit lock and writes event', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    const lockPath = `${logPath}.lock`;
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    writeFileSync(lockPath, JSON.stringify({ pid: 999999, createdAt: new Date(Date.now() - 5 * 60_000).toISOString() }), 'utf8');
+    const staleDate = new Date(Date.now() - 5 * 60_000);
+    utimesSync(lockPath, staleDate, staleDate);
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    const outcome = await runInstall('demo/stale-lock', plan, async () => ({
+      code: 0,
+      stdout: 'installed',
+      stderr: ''
+    }));
+
+    expect(outcome.status).toBe('installed');
+
+    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+
+    const result = runAuditVerify(logPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('OK verified=1');
+  });
+
+  it('keeps timeout/warn path for active audit lock', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    const lockPath = `${logPath}.lock`;
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }), 'utf8');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plan = planInstallAction('balanced', 'recommend', {});
+    const outcome = await runInstall('demo/active-lock', plan, async () => ({
+      code: 0,
+      stdout: 'installed',
+      stderr: ''
+    }));
+
+    expect(outcome.status).toBe('installed');
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.some((args) => String(args[0] ?? '').includes('install audit lock timeout'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('continues install flow when audit log write fails', async () => {
