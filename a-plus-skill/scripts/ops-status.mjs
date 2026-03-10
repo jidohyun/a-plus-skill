@@ -16,15 +16,18 @@ function parseArgs(argv = process.argv.slice(2)) {
 
   for (const arg of argv) {
     if (arg === '--strict') {
-      strictMode = 'nonhealthy';
+      strictMode = 'unhealthy';
       continue;
     }
     if (arg.startsWith('--strict=')) {
       const value = arg.slice('--strict='.length).trim();
-      if (value === 'unhealthy') {
+      if (value === 'nonhealthy') {
+        strictMode = 'nonhealthy';
+      } else if (value === 'unhealthy') {
         strictMode = 'unhealthy';
       } else {
-        strictMode = 'nonhealthy';
+        console.warn(`WARN unknown --strict mode ${q(value)}; fallback to "unhealthy"`);
+        strictMode = 'unhealthy';
       }
     }
   }

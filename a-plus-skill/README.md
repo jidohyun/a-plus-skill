@@ -225,10 +225,13 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 # 운영 상태 단일 라인 점검 (key=value)
 npm run ops:status
 
-# strict 모드(기본 nonhealthy): overall!=healthy면 exit 2
+# strict 모드(기본 unhealthy): overall=unhealthy일 때만 exit 2
 npm run ops:status -- --strict
 
-# 하위 호환 모드: unhealthy일 때만 exit 2
+# 확장 strict 모드: overall=degraded|unhealthy면 exit 2
+npm run ops:status -- --strict=nonhealthy
+
+# 하위 호환 명시 모드: unhealthy일 때만 exit 2
 npm run ops:status -- --strict=unhealthy
 ```
 
@@ -247,7 +250,8 @@ npm run ops:status -- --strict=unhealthy
 - `fast`: audit 실패는 허용 가능, 단 `fast_cap_tampered=true` 또는 cap 초과면 `unhealthy`
 
 `--strict` 종료 규약:
-- `--strict`(기본 `nonhealthy`): `overall=degraded|unhealthy`면 exit `2`
+- `--strict`(기본 `unhealthy`): `overall=unhealthy`일 때만 exit `2`
+- `--strict=nonhealthy`: `overall=degraded|unhealthy`면 exit `2`
 - `--strict=unhealthy`: `overall=unhealthy`일 때만 exit `2`
 
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`

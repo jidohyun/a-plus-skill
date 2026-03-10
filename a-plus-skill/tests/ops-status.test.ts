@@ -211,7 +211,7 @@ describe('ops-status script', () => {
     }
   });
 
-  it('--strict returns exit 2 when degraded', () => {
+  it('--strict keeps degraded as exit 0', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ops-status-strict-degraded-exit-'));
     try {
       const statePath = join(dir, 'data', 'strict-evidence-fail-state.json');
@@ -219,6 +219,22 @@ describe('ops-status script', () => {
       writeFileSync(statePath, `${JSON.stringify({ consecutiveFailures: 1 })}\n`, 'utf8');
 
       const result = runStatus(['--strict'], { INSTALL_POLICY: 'strict' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.overall).toBe('degraded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('--strict=nonhealthy returns exit 2 when degraded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-strict-nonhealthy-mode-'));
+    try {
+      const statePath = join(dir, 'data', 'strict-evidence-fail-state.json');
+      mkdirSync(join(dir, 'data'), { recursive: true });
+      writeFileSync(statePath, `${JSON.stringify({ consecutiveFailures: 1 })}\n`, 'utf8');
+
+      const result = runStatus(['--strict=nonhealthy'], { INSTALL_POLICY: 'strict' }, dir);
       expect(result.status).toBe(2);
       const out = parseLine(result.stdout);
       expect(out.overall).toBe('degraded');
@@ -236,6 +252,23 @@ describe('ops-status script', () => {
 
       const result = runStatus(['--strict=unhealthy'], { INSTALL_POLICY: 'strict' }, dir);
       expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.overall).toBe('degraded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('unknown --strict mode warns and falls back to unhealthy semantics', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-strict-unknown-mode-'));
+    try {
+      const statePath = join(dir, 'data', 'strict-evidence-fail-state.json');
+      mkdirSync(join(dir, 'data'), { recursive: true });
+      writeFileSync(statePath, `${JSON.stringify({ consecutiveFailures: 1 })}\n`, 'utf8');
+
+      const result = runStatus(['--strict=weird-mode'], { INSTALL_POLICY: 'strict' }, dir);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('WARN unknown --strict mode');
       const out = parseLine(result.stdout);
       expect(out.overall).toBe('degraded');
     } finally {
