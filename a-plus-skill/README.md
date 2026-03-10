@@ -222,14 +222,15 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
 - 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`
-- Bootstrap/anchor/marker/fuse 동작:
-  - 최초 1회(감사 로그 파일 + `.anchor` + `.bootstrapped` + `.bootstrap-fuse` 모두 없음)만 bootstrap 성공으로 허용됩니다.
-  - 감사 로그 append 성공 직후 `${auditPath}.anchor`, `${auditPath}.bootstrapped`, `${auditPath}.bootstrap-fuse`가 생성됩니다.
-  - `.bootstrapped` 또는 `.bootstrap-fuse`가 있는데 audit/anchor가 동시에 사라진 상태는 `bootstrap re-entry blocked`로 무결성 실패 처리됩니다.
+- Bootstrap/anchor/marker/fuse/latch 동작:
+  - 최초 1회(감사 로그 파일 + `.anchor` + `.bootstrapped` + `.bootstrap-fuse` + `.bootstrap-latch` 모두 없음)만 bootstrap 성공으로 허용됩니다.
+  - 감사 로그 append 성공 직후 `${auditPath}.anchor`, `${auditPath}.bootstrapped`, `${auditPath}.bootstrap-fuse`, `${auditPath}.bootstrap-latch`가 생성됩니다.
+  - `.bootstrap-latch`만 남고 audit/anchor/marker/fuse가 동시에 사라진 상태도 `bootstrap re-entry blocked`로 무결성 실패 처리됩니다.
   - 이후 로그 파일이 ENOENT여도 anchor가 있으면 무결성 실패로 처리되어 strict 우회가 불가합니다.
 - 런타임 설치 경로 연동 게이트(설치 루프 시작 전 자동 검증):
   - `strict`: 무결성 실패 시 즉시 fail-fast (설치 중단) + `data/install-ops-events.jsonl`에 `action=abort` 기록
-    - primary/fallback ops evidence 기록이 모두 실패하면 `ops_evidence_write_failed`를 포함해 throw
+    - primary/fallback ops evidence 기록이 모두 실패하면 strict gate throw는 유지
+    - 단, `STRICT_EVIDENCE_FAIL_OPEN_MAX`(기본 `2`, clamp `1..5`) 완충 윈도우 이내에서는 `ops_evidence_write_failed`를 경고로만 남기고, 임계치 초과 시 기존과 동일하게 `ops_evidence_write_failed` 포함 hard-fail
   - `balanced`: 설치 action을 `skip-install`로 강등하고 `notes`에 사유(line/reason) 기록 + ops event(`action=demote`) 기록
     - primary 실패 시 fallback 기록 시도, 둘 다 실패하면 경고 로그 강화
   - `fast`: 경고만 기록하고 설치 계속 진행 (`notes`에 `audit_integrity=failed` 포함)
@@ -238,7 +239,10 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
   - install audit event `notes`: `audit_integrity=ok|failed`, 실패 시 `audit_integrity_reason`, `audit_integrity_line`
   - ops event 로그(primary): `data/install-ops-events.jsonl`
   - ops event 로그(fallback): `data/install-ops-events.fallback.jsonl` (primary append 실패 시 best-effort)
-  - fast cap 상태 파일: `data/fast-audit-fail-cap.json` (`count` 누적 상태, 재실행 간 유지)
+  - fast cap 상태 파일: `data/fast-audit-fail-cap.json` (`schemaVersion/count/updatedAt/checksum`, lock + temp->rename 원자 갱신)
+  - fast cap 키 파일: `data/fast-audit-fail-cap.key` (로컬 checksum 키)
+  - key 존재 + state 누락/삭제, parse 실패, checksum 불일치(위변조) 감지 시 fail-open 없이 즉시 demote 경로로 유도
+  - strict evidence 실패 누적 상태: `data/strict-evidence-fail-state.json`
   - `hash mismatch`: 특정 라인 내용이 변조되었을 가능성
   - `prevHash mismatch`: 중간 라인 삭제/누락으로 체인이 단절되었을 가능성
   - `malformed JSON`: 파일 깨짐 또는 수동 편집 오류

@@ -9,6 +9,7 @@ import {
   computeInstallAuditHash,
   getInstallAuditAnchorPath,
   getInstallAuditBootstrapFusePath,
+  getInstallAuditBootstrapLatchPath,
   getInstallAuditBootstrapMarkerPath,
   getInstallAuditPath
 } from './auditIntegrity.js';
@@ -411,6 +412,24 @@ function writeInstallAuditBootstrapFuseIfMissing(file: string): void {
   }
 }
 
+function writeInstallAuditBootstrapLatchIfMissing(file: string): void {
+  const latchPath = getInstallAuditBootstrapLatchPath(file);
+  const latch = {
+    createdAt: new Date().toISOString(),
+    schemaVersion: INSTALL_AUDIT_SCHEMA_VERSION
+  };
+
+  try {
+    writeFileSync(latchPath, `${JSON.stringify(latch)}\n`, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
+    if (code === 'EEXIST') {
+      return;
+    }
+    throw error;
+  }
+}
+
 export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | 'prevHash' | 'eventId' | 'schemaVersion'>): void {
   let releaseLock: (() => void) | undefined;
 
@@ -435,6 +454,7 @@ export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | '
     appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');
     writeInstallAuditBootstrapMarkerIfMissing(file);
     writeInstallAuditBootstrapFuseIfMissing(file);
+    writeInstallAuditBootstrapLatchIfMissing(file);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[install-audit] failed to append JSONL event: ${sanitizeSensitiveText(reason)}`);

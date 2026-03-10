@@ -64,6 +64,10 @@ export function getInstallAuditBootstrapFusePath(auditPath = getInstallAuditPath
   return `${auditPath}.bootstrap-fuse`;
 }
 
+export function getInstallAuditBootstrapLatchPath(auditPath = getInstallAuditPath()): string {
+  return `${auditPath}.bootstrap-latch`;
+}
+
 export function verifyInstallAuditLines(lines: string[]): InstallAuditVerifyResult {
   let expectedPrevHash = INSTALL_AUDIT_GENESIS_PREV_HASH;
   let verifiedCount = 0;
@@ -125,24 +129,33 @@ export function verifyInstallAuditFile(filePath = getInstallAuditPath()): Instal
       const anchorPath = getInstallAuditAnchorPath(filePath);
       const markerPath = getInstallAuditBootstrapMarkerPath(filePath);
       const fusePath = getInstallAuditBootstrapFusePath(filePath);
+      const latchPath = getInstallAuditBootstrapLatchPath(filePath);
       const anchorExists = existsSync(anchorPath);
       const markerExists = existsSync(markerPath);
       const fuseExists = existsSync(fusePath);
+      const latchExists = existsSync(latchPath);
 
-      if (!anchorExists && !markerExists && !fuseExists) {
+      if (!anchorExists && !markerExists && !fuseExists && !latchExists) {
         return {
           ok: true,
           line: 0,
-          reason: 'bootstrap: audit file missing (ENOENT), anchor missing, marker missing, fuse missing',
+          reason: 'bootstrap: audit file missing (ENOENT), anchor missing, marker missing, fuse missing, latch missing',
           verifiedCount: 0,
           lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
         };
       }
 
+      if (!anchorExists && !markerExists && !fuseExists && latchExists) {
+        return fail(
+          0,
+          `bootstrap re-entry blocked: audit file missing (ENOENT), anchor missing, marker missing, fuse missing, latch exists=true (${latchPath})`
+        );
+      }
+
       if (!anchorExists && (markerExists || fuseExists)) {
         return fail(
           0,
-          `bootstrap re-entry blocked: audit file missing (ENOENT), anchor missing, marker exists=${markerExists} (${markerPath}), fuse exists=${fuseExists} (${fusePath})`
+          `bootstrap re-entry blocked: audit file missing (ENOENT), anchor missing, marker exists=${markerExists} (${markerPath}), fuse exists=${fuseExists} (${fusePath}), latch exists=${latchExists} (${latchPath})`
         );
       }
 

@@ -8,6 +8,7 @@ import {
   computeInstallAuditHash,
   getInstallAuditAnchorPath,
   getInstallAuditBootstrapFusePath,
+  getInstallAuditBootstrapLatchPath,
   getInstallAuditBootstrapMarkerPath,
   verifyInstallAuditFile,
   verifyInstallAuditLines
@@ -89,6 +90,7 @@ describe('audit integrity verification + gate policy', () => {
       expect(result.reason).toContain('anchor missing');
       expect(result.reason).toContain('marker missing');
       expect(result.reason).toContain('fuse missing');
+      expect(result.reason).toContain('latch missing');
       expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).not.toThrow();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -123,6 +125,23 @@ describe('audit integrity verification + gate policy', () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toContain('bootstrap re-entry blocked');
       expect(result.reason).toContain('fuse exists=true');
+      expect(result.reason).toContain('ENOENT');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails verify when latch exists and audit+anchor+marker+fuse are missing (bootstrap re-entry blocked)', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
+    const missingPath = join(tempDir, 'install-events.jsonl');
+    const latchPath = getInstallAuditBootstrapLatchPath(missingPath);
+
+    try {
+      writeFileSync(latchPath, JSON.stringify({ createdAt: '2026-01-01T00:00:00.000Z', schemaVersion: 1 }), 'utf8');
+      const result = verifyInstallAuditFile(missingPath);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('bootstrap re-entry blocked');
+      expect(result.reason).toContain('latch exists=true');
       expect(result.reason).toContain('ENOENT');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -177,7 +196,11 @@ describe('audit integrity verification + gate policy', () => {
     expect(fastPlan.notes.join(' ')).toContain('audit_integrity=failed');
   });
 
-  it('throws strict with ops_evidence_write_failed when primary and fallback writes both fail', async () => {
+  it('strict evidence write failure is buffered within resilience window', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-strict-fail-state-'));
+    const prevCwd = process.cwd();
+    process.chdir(tempDir);
+
     vi.resetModules();
     vi.doMock('node:fs', async () => {
       const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -189,19 +212,28 @@ describe('audit integrity verification + gate policy', () => {
       };
     });
 
-    const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
-    const failedIntegrity = {
-      ok: false,
-      line: 7,
-      reason: 'hash mismatch',
-      verifiedCount: 0,
-      lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
-    } as const;
+    try {
+      const { enforceAuditIntegrityPolicy: mockedEnforce, parseStrictEvidenceFailOpenMax: parseMax } = await import('../src/index.js');
+      const failedIntegrity = {
+        ok: false,
+        line: 7,
+        reason: 'hash mismatch',
+        verifiedCount: 0,
+        lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+      } as const;
 
-    expect(() => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/ops_evidence_write_failed/);
+      expect(parseMax(undefined)).toBe(2);
+      expect(() => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/\[strict\]/);
+      expect(() => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/\[strict\]/);
 
-    vi.doUnmock('node:fs');
-    vi.resetModules();
+      const third = () => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
+      expect(third).toThrow(/ops_evidence_write_failed/);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+      process.chdir(prevCwd);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps balanced demote + warns stronger when ops evidence primary/fallback both fail', async () => {

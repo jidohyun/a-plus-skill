@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
@@ -10,7 +10,12 @@ import {
   parseInstallCommandTimeoutMs,
   runInstall
 } from '../src/install/openclawInstaller.js';
-import { getInstallAuditAnchorPath, getInstallAuditBootstrapFusePath, getInstallAuditBootstrapMarkerPath } from '../src/install/auditIntegrity.js';
+import {
+  getInstallAuditAnchorPath,
+  getInstallAuditBootstrapFusePath,
+  getInstallAuditBootstrapLatchPath,
+  getInstallAuditBootstrapMarkerPath
+} from '../src/install/auditIntegrity.js';
 import {
   appendInstallOpsEvent,
   consumeFastAuditFailInstallCap,
@@ -73,6 +78,35 @@ await runInstall(${JSON.stringify(slug)}, plan, async () => ({ code: 0, stdout: 
       env: {
         ...process.env,
         INSTALL_AUDIT_LOG_PATH: logPath,
+        INSTALL_OVERRIDE_SIGNING_SECRET: TEST_SIGNING_SECRET
+      },
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on('close', (code) => {
+      resolve({ code, stderr });
+    });
+  });
+}
+
+function runFastCapConsumerProcess(statePath: string, keyPath: string, cap: number): Promise<{ code: number | null; stderr: string }> {
+  const childScript = `
+import { consumeFastAuditFailInstallCap } from './src/index.ts';
+import { planInstallAction } from './src/policy/policyEngine.ts';
+const plan = planInstallAction('fast', 'recommend', {});
+consumeFastAuditFailInstallCap('fast', plan, { ok: false, line: 1, reason: 'hash mismatch', verifiedCount: 0, lastHash: 'genesis' }, ${cap}, ${JSON.stringify(statePath)}, ${JSON.stringify(keyPath)});
+`;
+
+  return new Promise((resolve) => {
+    const child = spawn('node', ['--input-type=module', '--import', 'tsx', '-e', childScript], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
         INSTALL_OVERRIDE_SIGNING_SECRET: TEST_SIGNING_SECRET
       },
       stdio: ['ignore', 'ignore', 'pipe']
@@ -355,6 +389,69 @@ describe('install flow', () => {
     expect(third.plan.notes.join(' ')).toContain('fast install cap exceeded (3/2)');
   });
 
+  it('demotes on fast-cap checksum tamper (no fail-open)', () => {
+    const failedIntegrity = {
+      ok: false,
+      line: 12,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: 'genesis'
+    } as const;
+    const dir = mkdtempSync(join(tmpdir(), 'fast-cap-tamper-'));
+    const statePath = join(dir, 'fast-audit-fail-cap.json');
+    const keyPath = join(dir, 'fast-audit-fail-cap.key');
+    const base = planInstallAction('fast', 'recommend', {});
+
+    consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 5, statePath, keyPath);
+
+    const tampered = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    tampered.count = 0;
+    writeFileSync(statePath, `${JSON.stringify(tampered, null, 2)}\n`, 'utf8');
+
+    const second = consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 5, statePath, keyPath);
+    expect(second.demotedByCap).toBe(true);
+    expect(second.count).toBe(6);
+  });
+
+  it('demotes on suspicious reset when key exists but state file is deleted', () => {
+    const failedIntegrity = {
+      ok: false,
+      line: 13,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: 'genesis'
+    } as const;
+    const dir = mkdtempSync(join(tmpdir(), 'fast-cap-reset-'));
+    const statePath = join(dir, 'fast-audit-fail-cap.json');
+    const keyPath = join(dir, 'fast-audit-fail-cap.key');
+    const base = planInstallAction('fast', 'recommend', {});
+
+    consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 4, statePath, keyPath);
+    rmSync(statePath, { force: true });
+
+    const second = consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 4, statePath, keyPath);
+    expect(second.demotedByCap).toBe(true);
+    expect(second.count).toBe(5);
+  });
+
+  it('keeps fast-cap counter consistent across concurrent multi-process updates', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fast-cap-concurrent-'));
+    const statePath = join(dir, 'fast-audit-fail-cap.json');
+    const keyPath = join(dir, 'fast-audit-fail-cap.key');
+
+    const writes = await Promise.all(Array.from({ length: 8 }, () => runFastCapConsumerProcess(statePath, keyPath, 50)));
+    for (const write of writes) {
+      expect(write.code).toBe(0);
+      expect(write.stderr).toBe('');
+    }
+
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(state.count).toBe(8);
+    expect(state.schemaVersion).toBe(1);
+    expect(typeof state.updatedAt).toBe('string');
+    expect(typeof state.checksum).toBe('string');
+  });
+
   it('records ops-event when fast audit-failure cap demotes install', () => {
     const failedIntegrity = {
       ok: false,
@@ -388,7 +485,7 @@ describe('install flow', () => {
     const event = JSON.parse(readFileSync(opsPath, 'utf8').trim()) as Record<string, unknown>;
     expect(event.policy).toBe('fast');
     expect(event.action).toBe('demote');
-    expect(event.notes).toEqual(['count=2', 'cap=1', 'slug=demo/skill']);
+    expect(event.notes).toEqual([`count=${second.count}`, 'cap=1', 'slug=demo/skill']);
   });
 
   it('writes audit event for canInstall=false path', async () => {
@@ -441,6 +538,13 @@ describe('install flow', () => {
     const fuse = JSON.parse(readFileSync(fusePath, 'utf8')) as Record<string, unknown>;
     expect(typeof fuse.createdAt).toBe('string');
     expect(fuse.schemaVersion).toBe(1);
+
+    const latchPath = getInstallAuditBootstrapLatchPath(logPath);
+    expect(existsSync(latchPath)).toBe(true);
+
+    const latch = JSON.parse(readFileSync(latchPath, 'utf8')) as Record<string, unknown>;
+    expect(typeof latch.createdAt).toBe('string');
+    expect(latch.schemaVersion).toBe(1);
   });
 
   it('warns and avoids fail-open append when anchor create fails with non-EEXIST error', async () => {

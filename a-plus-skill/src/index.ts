@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -116,28 +117,174 @@ export function appendInstallOpsEvent(
 }
 
 const FAST_AUDIT_FAIL_CAP_STATE_PATH = resolve(process.cwd(), 'data', 'fast-audit-fail-cap.json');
+const FAST_AUDIT_FAIL_CAP_KEY_PATH = resolve(process.cwd(), 'data', 'fast-audit-fail-cap.key');
+
+function getFastAuditFailCapKeyPath(statePath = FAST_AUDIT_FAIL_CAP_STATE_PATH): string {
+  if (statePath === FAST_AUDIT_FAIL_CAP_STATE_PATH) return FAST_AUDIT_FAIL_CAP_KEY_PATH;
+  return resolve(dirname(statePath), 'fast-audit-fail-cap.key');
+}
+const FAST_AUDIT_FAIL_CAP_SCHEMA_VERSION = 1;
+const FAST_AUDIT_FAIL_CAP_LOCK_TIMEOUT_MS = 1_000;
+const STRICT_EVIDENCE_FAIL_STATE_PATH = resolve(process.cwd(), 'data', 'strict-evidence-fail-state.json');
 
 type FastAuditFailCapState = {
+  schemaVersion: number;
   count: number;
+  updatedAt: string;
+  checksum: string;
 };
 
-function readFastAuditFailCapState(path = FAST_AUDIT_FAIL_CAP_STATE_PATH): FastAuditFailCapState {
-  try {
-    const raw = readFileSync(path, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<FastAuditFailCapState>;
-    const count = Number(parsed.count);
-    if (!Number.isFinite(count) || count < 0) {
-      return { count: 0 };
+type StrictEvidenceFailState = {
+  schemaVersion: number;
+  consecutiveFailures: number;
+  updatedAt: string;
+};
+
+function withFileLock(lockPath: string, fn: () => void): void {
+  const deadline = Date.now() + FAST_AUDIT_FAIL_CAP_LOCK_TIMEOUT_MS;
+
+  while (Date.now() <= deadline) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      try {
+        fn();
+      } finally {
+        try {
+          closeSync(fd);
+        } catch {
+          // best effort
+        }
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // best effort
+        }
+      }
+      return;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
     }
-    return { count: Math.floor(count) };
+  }
+
+  throw new Error(`file lock timeout (${lockPath})`);
+}
+
+function computeFastAuditCapChecksum(key: string, schemaVersion: number, count: number, updatedAt: string): string {
+  return createHash('sha256').update(`${schemaVersion}:${count}:${updatedAt}:${key}`, 'utf8').digest('hex');
+}
+
+function ensureFastAuditCapKey(keyPath = FAST_AUDIT_FAIL_CAP_KEY_PATH): string {
+  mkdirSync(dirname(keyPath), { recursive: true });
+
+  try {
+    const existing = readFileSync(keyPath, 'utf8').trim();
+    if (existing) return existing;
   } catch {
-    return { count: 0 };
+    // continue and create key
+  }
+
+  const key = randomBytes(32).toString('hex');
+  try {
+    writeFileSync(keyPath, `${key}\n`, { encoding: 'utf8', flag: 'wx' });
+    return key;
+  } catch {
+    return readFileSync(keyPath, 'utf8').trim();
   }
 }
 
-function writeFastAuditFailCapState(state: FastAuditFailCapState, path = FAST_AUDIT_FAIL_CAP_STATE_PATH): void {
+function readStrictEvidenceFailState(path = STRICT_EVIDENCE_FAIL_STATE_PATH): StrictEvidenceFailState {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<StrictEvidenceFailState>;
+    const consecutiveFailures = Number(parsed.consecutiveFailures);
+    return {
+      schemaVersion: 1,
+      consecutiveFailures: Number.isFinite(consecutiveFailures) && consecutiveFailures > 0 ? Math.floor(consecutiveFailures) : 0,
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString()
+    };
+  } catch {
+    return { schemaVersion: 1, consecutiveFailures: 0, updatedAt: new Date(0).toISOString() };
+  }
+}
+
+function writeStrictEvidenceFailState(state: StrictEvidenceFailState, path = STRICT_EVIDENCE_FAIL_STATE_PATH): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+export function parseStrictEvidenceFailOpenMax(raw = process.env.STRICT_EVIDENCE_FAIL_OPEN_MAX): number {
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed)) return 2;
+  return Math.max(1, Math.min(5, Math.floor(parsed)));
+}
+
+function readFastAuditFailCapState(
+  statePath = FAST_AUDIT_FAIL_CAP_STATE_PATH,
+  keyPath = getFastAuditFailCapKeyPath(statePath)
+): { count: number; tampered: boolean; reason?: string } {
+  const keyExists = (() => {
+    try {
+      return readFileSync(keyPath, 'utf8').trim().length > 0;
+    } catch {
+      return false;
+    }
+  })();
+
+  let raw = '';
+  try {
+    raw = readFileSync(statePath, 'utf8');
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
+    if (code === 'ENOENT') {
+      if (keyExists) {
+        return { count: 0, tampered: true, reason: 'suspicious fast-cap reset: key exists while state missing' };
+      }
+      return { count: 0, tampered: false };
+    }
+    return { count: 0, tampered: true, reason: 'fast-cap state read failed' };
+  }
+
+  const key = ensureFastAuditCapKey(keyPath);
+  try {
+    const parsed = JSON.parse(raw) as Partial<FastAuditFailCapState>;
+    const count = Number(parsed.count);
+    const schemaVersion = Number(parsed.schemaVersion);
+    const updatedAt = String(parsed.updatedAt ?? '');
+    const checksum = String(parsed.checksum ?? '');
+    if (!Number.isFinite(count) || count < 0 || schemaVersion !== FAST_AUDIT_FAIL_CAP_SCHEMA_VERSION || !updatedAt || !checksum) {
+      return { count: 0, tampered: true, reason: 'fast-cap state schema invalid' };
+    }
+
+    const expectedChecksum = computeFastAuditCapChecksum(key, schemaVersion, Math.floor(count), updatedAt);
+    if (expectedChecksum !== checksum) {
+      return { count: 0, tampered: true, reason: 'fast-cap checksum mismatch' };
+    }
+
+    return { count: Math.floor(count), tampered: false };
+  } catch {
+    return { count: 0, tampered: true, reason: 'fast-cap state parse failed' };
+  }
+}
+
+function writeFastAuditFailCapState(
+  count: number,
+  statePath = FAST_AUDIT_FAIL_CAP_STATE_PATH,
+  keyPath = getFastAuditFailCapKeyPath(statePath)
+): void {
+  mkdirSync(dirname(statePath), { recursive: true });
+  const key = ensureFastAuditCapKey(keyPath);
+  const updatedAt = new Date().toISOString();
+  const state: FastAuditFailCapState = {
+    schemaVersion: FAST_AUDIT_FAIL_CAP_SCHEMA_VERSION,
+    count,
+    updatedAt,
+    checksum: computeFastAuditCapChecksum(key, FAST_AUDIT_FAIL_CAP_SCHEMA_VERSION, count, updatedAt)
+  };
+  const tmpPath = `${statePath}.tmp.${process.pid}`;
+  writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  renameSync(tmpPath, statePath);
 }
 
 export function consumeFastAuditFailInstallCap(
@@ -145,15 +292,39 @@ export function consumeFastAuditFailInstallCap(
   installPlan: InstallPlan,
   auditIntegrity: InstallAuditVerifyResult,
   maxInstallsOnAuditFailure = parseFastAuditFailMaxInstalls(),
-  statePath = FAST_AUDIT_FAIL_CAP_STATE_PATH
+  statePath = FAST_AUDIT_FAIL_CAP_STATE_PATH,
+  keyPath = getFastAuditFailCapKeyPath(statePath)
 ): { plan: InstallPlan; count: number; cap: number; demotedByCap: boolean } {
   if (policy !== 'fast' || auditIntegrity.ok || !installPlan.canInstall) {
     return { plan: installPlan, count: 0, cap: maxInstallsOnAuditFailure, demotedByCap: false };
   }
 
-  const currentState = readFastAuditFailCapState(statePath);
-  const nextCount = currentState.count + 1;
-  writeFastAuditFailCapState({ count: nextCount }, statePath);
+  let nextCount = 1;
+  let tamperedReason: string | undefined;
+  const lockPath = `${statePath}.lock`;
+
+  withFileLock(lockPath, () => {
+    const current = readFastAuditFailCapState(statePath, keyPath);
+    if (current.tampered) {
+      tamperedReason = current.reason ?? 'fast-cap tamper detected';
+      nextCount = maxInstallsOnAuditFailure + 1;
+    } else {
+      nextCount = current.count + 1;
+    }
+
+    writeFastAuditFailCapState(nextCount, statePath, keyPath);
+  });
+
+  if (tamperedReason) {
+    appendInstallOpsEvent({
+      policy,
+      reason: tamperedReason,
+      line: auditIntegrity.line,
+      action: 'demote',
+      auditPath: getInstallAuditPath(),
+      notes: [`statePath=${statePath}`]
+    });
+  }
 
   if (nextCount <= maxInstallsOnAuditFailure) {
     return { plan: installPlan, count: nextCount, cap: maxInstallsOnAuditFailure, demotedByCap: false };
@@ -248,10 +419,32 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
 
   if (policy === 'strict') {
     if (!primaryWrite.ok && !fallbackWrite?.ok) {
+      const maxFailOpen = parseStrictEvidenceFailOpenMax();
+      const current = readStrictEvidenceFailState();
+      const nextFailures = current.consecutiveFailures + 1;
+      writeStrictEvidenceFailState({
+        schemaVersion: 1,
+        consecutiveFailures: nextFailures,
+        updatedAt: new Date().toISOString()
+      });
+
+      if (nextFailures <= maxFailOpen) {
+        console.warn(
+          `[strict] ${gateMessage}; ops evidence write failed but within resilience window (${nextFailures}/${maxFailOpen}) primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+        );
+        throw new Error(`[strict] ${gateMessage}`);
+      }
+
       throw new Error(
         `[strict] ${gateMessage}; ops_evidence_write_failed primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
       );
     }
+
+    writeStrictEvidenceFailState({
+      schemaVersion: 1,
+      consecutiveFailures: 0,
+      updatedAt: new Date().toISOString()
+    });
     throw new Error(`[strict] ${gateMessage}`);
   }
 
