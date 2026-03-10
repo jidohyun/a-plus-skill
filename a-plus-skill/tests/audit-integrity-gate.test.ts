@@ -1,12 +1,13 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   INSTALL_AUDIT_GENESIS_PREV_HASH,
   INSTALL_AUDIT_SCHEMA_VERSION,
   computeInstallAuditHash,
   getInstallAuditAnchorPath,
+  getInstallAuditBootstrapFusePath,
   getInstallAuditBootstrapMarkerPath,
   verifyInstallAuditFile,
   verifyInstallAuditLines
@@ -87,6 +88,7 @@ describe('audit integrity verification + gate policy', () => {
       expect(result.reason).toContain('ENOENT');
       expect(result.reason).toContain('anchor missing');
       expect(result.reason).toContain('marker missing');
+      expect(result.reason).toContain('fuse missing');
       expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).not.toThrow();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -104,6 +106,23 @@ describe('audit integrity verification + gate policy', () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toContain('bootstrap re-entry blocked');
       expect(result.reason).toContain('marker exists');
+      expect(result.reason).toContain('ENOENT');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails verify when fuse exists and audit+anchor+marker are missing (bootstrap re-entry blocked)', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
+    const missingPath = join(tempDir, 'install-events.jsonl');
+    const fusePath = getInstallAuditBootstrapFusePath(missingPath);
+
+    try {
+      writeFileSync(fusePath, JSON.stringify({ createdAt: '2026-01-01T00:00:00.000Z', schemaVersion: 1 }), 'utf8');
+      const result = verifyInstallAuditFile(missingPath);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('bootstrap re-entry blocked');
+      expect(result.reason).toContain('fuse exists=true');
       expect(result.reason).toContain('ENOENT');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -156,5 +175,63 @@ describe('audit integrity verification + gate policy', () => {
     expect(fastPlan.action).toBe('auto-install');
     expect(fastPlan.canInstall).toBe(true);
     expect(fastPlan.notes.join(' ')).toContain('audit_integrity=failed');
+  });
+
+  it('throws strict with ops_evidence_write_failed when primary and fallback writes both fail', async () => {
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        appendFileSync: vi.fn(() => {
+          throw new Error('disk full');
+        })
+      };
+    });
+
+    const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
+    const failedIntegrity = {
+      ok: false,
+      line: 7,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+    } as const;
+
+    expect(() => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/ops_evidence_write_failed/);
+
+    vi.doUnmock('node:fs');
+    vi.resetModules();
+  });
+
+  it('keeps balanced demote + warns stronger when ops evidence primary/fallback both fail', async () => {
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        appendFileSync: vi.fn(() => {
+          throw new Error('disk full');
+        })
+      };
+    });
+
+    const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failedIntegrity = {
+      ok: false,
+      line: 8,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+    } as const;
+
+    expect(() => mockedEnforce('balanced', failedIntegrity, '/tmp/install-events.jsonl')).not.toThrow();
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.some((args) => String(args[0] ?? '').includes('evidence write failed'))).toBe(true);
+
+    warn.mockRestore();
+    vi.doUnmock('node:fs');
+    vi.resetModules();
   });
 });

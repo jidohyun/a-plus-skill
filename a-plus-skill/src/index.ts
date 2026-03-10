@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -81,53 +81,97 @@ export function parseFastAuditFailMaxInstalls(raw = process.env.FAST_AUDIT_FAIL_
   return Math.max(minCap, Math.min(maxCap, rounded));
 }
 
-export function appendInstallOpsEvent(event: {
-  policy: Policy;
-  reason: string;
-  line: number;
-  action: 'abort' | 'demote';
-  auditPath: string;
-}): void {
+export type InstallOpsEventAppendResult = {
+  ok: boolean;
+  path: string;
+  error?: string;
+};
+
+export function appendInstallOpsEvent(
+  event: {
+    policy: Policy;
+    reason: string;
+    line: number;
+    action: 'abort' | 'demote';
+    auditPath: string;
+    notes?: string[];
+  },
+  targetPath = resolve(process.cwd(), 'data', 'install-ops-events.jsonl')
+): InstallOpsEventAppendResult {
   try {
-    const filePath = resolve(process.cwd(), 'data', 'install-ops-events.jsonl');
-    mkdirSync(dirname(filePath), { recursive: true });
+    mkdirSync(dirname(targetPath), { recursive: true });
     appendFileSync(
-      filePath,
+      targetPath,
       `${JSON.stringify({
         ts: new Date().toISOString(),
         ...event
       })}\n`,
       'utf8'
     );
+    return { ok: true, path: targetPath };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    console.warn(`[install-ops] failed to append ops event: ${reason}`);
+    return { ok: false, path: targetPath, error: reason };
   }
 }
 
-export function applyFastAuditFailInstallCap(
+const FAST_AUDIT_FAIL_CAP_STATE_PATH = resolve(process.cwd(), 'data', 'fast-audit-fail-cap.json');
+
+type FastAuditFailCapState = {
+  count: number;
+};
+
+function readFastAuditFailCapState(path = FAST_AUDIT_FAIL_CAP_STATE_PATH): FastAuditFailCapState {
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<FastAuditFailCapState>;
+    const count = Number(parsed.count);
+    if (!Number.isFinite(count) || count < 0) {
+      return { count: 0 };
+    }
+    return { count: Math.floor(count) };
+  } catch {
+    return { count: 0 };
+  }
+}
+
+function writeFastAuditFailCapState(state: FastAuditFailCapState, path = FAST_AUDIT_FAIL_CAP_STATE_PATH): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+export function consumeFastAuditFailInstallCap(
   policy: Policy,
   installPlan: InstallPlan,
   auditIntegrity: InstallAuditVerifyResult,
-  installCountOnAuditFailure: number,
-  maxInstallsOnAuditFailure = parseFastAuditFailMaxInstalls()
-): InstallPlan {
+  maxInstallsOnAuditFailure = parseFastAuditFailMaxInstalls(),
+  statePath = FAST_AUDIT_FAIL_CAP_STATE_PATH
+): { plan: InstallPlan; count: number; cap: number; demotedByCap: boolean } {
   if (policy !== 'fast' || auditIntegrity.ok || !installPlan.canInstall) {
-    return installPlan;
+    return { plan: installPlan, count: 0, cap: maxInstallsOnAuditFailure, demotedByCap: false };
   }
 
-  if (installCountOnAuditFailure <= maxInstallsOnAuditFailure) {
-    return installPlan;
+  const currentState = readFastAuditFailCapState(statePath);
+  const nextCount = currentState.count + 1;
+  writeFastAuditFailCapState({ count: nextCount }, statePath);
+
+  if (nextCount <= maxInstallsOnAuditFailure) {
+    return { plan: installPlan, count: nextCount, cap: maxInstallsOnAuditFailure, demotedByCap: false };
   }
 
   return {
-    ...installPlan,
-    action: 'skip-install',
-    canInstall: false,
-    notes: [
-      ...installPlan.notes,
-      `audit integrity gate: fast install cap exceeded (${installCountOnAuditFailure}/${maxInstallsOnAuditFailure}), demoted to skip-install`
-    ]
+    plan: {
+      ...installPlan,
+      action: 'skip-install',
+      canInstall: false,
+      notes: [
+        ...installPlan.notes,
+        `audit integrity gate: fast install cap exceeded (${nextCount}/${maxInstallsOnAuditFailure}), demoted to skip-install`
+      ]
+    },
+    count: nextCount,
+    cap: maxInstallsOnAuditFailure,
+    demotedByCap: true
   };
 }
 
@@ -177,26 +221,52 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
   if (auditIntegrity.ok) return;
 
   const gateMessage = `install audit integrity check failed (path=${auditPath}, line=${auditIntegrity.line}, reason=${auditIntegrity.reason})`;
+  const fallbackOpsPath = resolve(process.cwd(), 'data', 'install-ops-events.fallback.jsonl');
+  const action = policy === 'strict' ? 'abort' : 'demote';
+  const primaryWrite = appendInstallOpsEvent({
+    policy,
+    reason: auditIntegrity.reason,
+    line: auditIntegrity.line,
+    action,
+    auditPath
+  });
+
+  let fallbackWrite: InstallOpsEventAppendResult | undefined;
+  if (!primaryWrite.ok) {
+    fallbackWrite = appendInstallOpsEvent(
+      {
+        policy,
+        reason: auditIntegrity.reason,
+        line: auditIntegrity.line,
+        action,
+        auditPath,
+        notes: [`primary_failed=${primaryWrite.error ?? 'unknown'}`]
+      },
+      fallbackOpsPath
+    );
+  }
+
   if (policy === 'strict') {
-    appendInstallOpsEvent({
-      policy,
-      reason: auditIntegrity.reason,
-      line: auditIntegrity.line,
-      action: 'abort',
-      auditPath
-    });
+    if (!primaryWrite.ok && !fallbackWrite?.ok) {
+      throw new Error(
+        `[strict] ${gateMessage}; ops_evidence_write_failed primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+      );
+    }
     throw new Error(`[strict] ${gateMessage}`);
   }
 
   if (policy === 'balanced') {
-    appendInstallOpsEvent({
-      policy,
-      reason: auditIntegrity.reason,
-      line: auditIntegrity.line,
-      action: 'demote',
-      auditPath
-    });
-    console.warn(`[balanced] ${gateMessage}; demoting all installs to skip-install`);
+    if (!primaryWrite.ok && !fallbackWrite?.ok) {
+      console.warn(
+        `[balanced] ${gateMessage}; demoting all installs to skip-install; evidence write failed primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+      );
+    } else if (!primaryWrite.ok && fallbackWrite?.ok) {
+      console.warn(
+        `[balanced] ${gateMessage}; demoting all installs to skip-install; evidence fallback written (${fallbackWrite.path}), primary failed (${primaryWrite.error ?? 'unknown'})`
+      );
+    } else {
+      console.warn(`[balanced] ${gateMessage}; demoting all installs to skip-install`);
+    }
   } else {
     console.warn(`[fast] ${gateMessage}; proceeding with warning`);
   }
@@ -216,7 +286,6 @@ export async function main() {
 
   const results: RecommendationResult[] = [];
   const fastAuditFailMaxInstalls = parseFastAuditFailMaxInstalls();
-  let fastAuditFailInstallCount = 0;
 
   for (let i = 0; i < skills.length; i += 1) {
     const s = skills[i]!;
@@ -238,16 +307,19 @@ export async function main() {
     });
 
     const installPlanWithGate = applyAuditIntegrityGate(policy, installPlanBase, auditIntegrity);
-    if (policy === 'fast' && !auditIntegrity.ok && installPlanWithGate.canInstall) {
-      fastAuditFailInstallCount += 1;
+    const fastCap = consumeFastAuditFailInstallCap(policy, installPlanWithGate, auditIntegrity, fastAuditFailMaxInstalls);
+    const installPlan = fastCap.plan;
+
+    if (policy === 'fast' && fastCap.demotedByCap) {
+      appendInstallOpsEvent({
+        policy,
+        reason: 'fast audit failure cap exceeded',
+        line: auditIntegrity.line,
+        action: 'demote',
+        auditPath,
+        notes: [`count=${fastCap.count}`, `cap=${fastCap.cap}`, `slug=${s.slug}`]
+      });
     }
-    const installPlan = applyFastAuditFailInstallCap(
-      policy,
-      installPlanWithGate,
-      auditIntegrity,
-      fastAuditFailInstallCount,
-      fastAuditFailMaxInstalls
-    );
 
     const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
     if (meta.degraded) {

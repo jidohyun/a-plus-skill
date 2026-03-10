@@ -10,9 +10,10 @@ import {
   parseInstallCommandTimeoutMs,
   runInstall
 } from '../src/install/openclawInstaller.js';
-import { getInstallAuditAnchorPath, getInstallAuditBootstrapMarkerPath } from '../src/install/auditIntegrity.js';
+import { getInstallAuditAnchorPath, getInstallAuditBootstrapFusePath, getInstallAuditBootstrapMarkerPath } from '../src/install/auditIntegrity.js';
 import {
-  applyFastAuditFailInstallCap,
+  appendInstallOpsEvent,
+  consumeFastAuditFailInstallCap,
   parseInstallTimeoutRecoveryDelayMs,
   shouldRecoverAfterInstallTimeout,
   waitForInstallTimeoutRecovery
@@ -329,7 +330,7 @@ describe('install flow', () => {
     expect(parseInstallTimeoutRecoveryDelayMs('0')).toBe(0);
   });
 
-  it('applies fast audit-failure install cap and demotes over-cap installs to skip', () => {
+  it('applies fast audit-failure install cap with persisted state across reruns', () => {
     process.env.FAST_AUDIT_FAIL_MAX_INSTALLS = '2';
     const failedIntegrity = {
       ok: false,
@@ -339,14 +340,55 @@ describe('install flow', () => {
       lastHash: 'genesis'
     } as const;
 
+    const dir = mkdtempSync(join(tmpdir(), 'fast-cap-state-'));
+    const statePath = join(dir, 'fast-audit-fail-cap.json');
     const base = planInstallAction('fast', 'recommend', {});
-    const withinCap = applyFastAuditFailInstallCap('fast', base, failedIntegrity, 2);
-    expect(withinCap.canInstall).toBe(true);
 
-    const overCap = applyFastAuditFailInstallCap('fast', base, failedIntegrity, 3);
-    expect(overCap.canInstall).toBe(false);
-    expect(overCap.action).toBe('skip-install');
-    expect(overCap.notes.join(' ')).toContain('fast install cap exceeded (3/2)');
+    const first = consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 2, statePath);
+    const second = consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 2, statePath);
+    const third = consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 2, statePath);
+
+    expect(first.plan.canInstall).toBe(true);
+    expect(second.plan.canInstall).toBe(true);
+    expect(third.plan.canInstall).toBe(false);
+    expect(third.plan.action).toBe('skip-install');
+    expect(third.plan.notes.join(' ')).toContain('fast install cap exceeded (3/2)');
+  });
+
+  it('records ops-event when fast audit-failure cap demotes install', () => {
+    const failedIntegrity = {
+      ok: false,
+      line: 11,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: 'genesis'
+    } as const;
+    const dir = mkdtempSync(join(tmpdir(), 'fast-cap-ops-'));
+    const statePath = join(dir, 'fast-audit-fail-cap.json');
+    const opsPath = join(dir, 'install-ops-events.jsonl');
+    const base = planInstallAction('fast', 'recommend', {});
+
+    consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 1, statePath);
+    const second = consumeFastAuditFailInstallCap('fast', base, failedIntegrity, 1, statePath);
+    expect(second.demotedByCap).toBe(true);
+
+    const append = appendInstallOpsEvent(
+      {
+        policy: 'fast',
+        reason: 'fast audit failure cap exceeded',
+        line: failedIntegrity.line,
+        action: 'demote',
+        auditPath: '/tmp/install-events.jsonl',
+        notes: [`count=${second.count}`, `cap=${second.cap}`, 'slug=demo/skill']
+      },
+      opsPath
+    );
+
+    expect(append.ok).toBe(true);
+    const event = JSON.parse(readFileSync(opsPath, 'utf8').trim()) as Record<string, unknown>;
+    expect(event.policy).toBe('fast');
+    expect(event.action).toBe('demote');
+    expect(event.notes).toEqual(['count=2', 'cap=1', 'slug=demo/skill']);
   });
 
   it('writes audit event for canInstall=false path', async () => {
@@ -369,7 +411,7 @@ describe('install flow', () => {
     expect(event.errorCode).toBeUndefined();
   });
 
-  it('creates audit anchor + bootstrapped marker files after successful audit append', async () => {
+  it('creates audit anchor + bootstrapped marker + bootstrap fuse files after successful audit append', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
     const logPath = join(dir, 'events.jsonl');
     process.env.INSTALL_AUDIT_LOG_PATH = logPath;
@@ -392,6 +434,13 @@ describe('install flow', () => {
     const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>;
     expect(typeof marker.createdAt).toBe('string');
     expect(marker.schemaVersion).toBe(1);
+
+    const fusePath = getInstallAuditBootstrapFusePath(logPath);
+    expect(existsSync(fusePath)).toBe(true);
+
+    const fuse = JSON.parse(readFileSync(fusePath, 'utf8')) as Record<string, unknown>;
+    expect(typeof fuse.createdAt).toBe('string');
+    expect(fuse.schemaVersion).toBe(1);
   });
 
   it('warns and avoids fail-open append when anchor create fails with non-EEXIST error', async () => {
