@@ -140,6 +140,11 @@ type StrictEvidenceFailState = {
   updatedAt: string;
 };
 
+type StrictEvidenceFailStateWriteResult = {
+  ok: boolean;
+  error?: string;
+};
+
 function withFileLock(lockPath: string, fn: () => void): void {
   const deadline = Date.now() + FAST_AUDIT_FAIL_CAP_LOCK_TIMEOUT_MS;
 
@@ -212,6 +217,19 @@ function readStrictEvidenceFailState(path = STRICT_EVIDENCE_FAIL_STATE_PATH): St
 function writeStrictEvidenceFailState(state: StrictEvidenceFailState, path = STRICT_EVIDENCE_FAIL_STATE_PATH): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function tryWriteStrictEvidenceFailState(
+  state: StrictEvidenceFailState,
+  path = STRICT_EVIDENCE_FAIL_STATE_PATH
+): StrictEvidenceFailStateWriteResult {
+  try {
+    writeStrictEvidenceFailState(state, path);
+    return { ok: true };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: reason };
+  }
 }
 
 export function parseStrictEvidenceFailOpenMax(raw = process.env.STRICT_EVIDENCE_FAIL_OPEN_MAX): number {
@@ -422,11 +440,17 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
       const maxFailOpen = parseStrictEvidenceFailOpenMax();
       const current = readStrictEvidenceFailState();
       const nextFailures = current.consecutiveFailures + 1;
-      writeStrictEvidenceFailState({
+      const failStateWrite = tryWriteStrictEvidenceFailState({
         schemaVersion: 1,
         consecutiveFailures: nextFailures,
         updatedAt: new Date().toISOString()
       });
+
+      if (!failStateWrite.ok) {
+        throw new Error(
+          `[strict] ${gateMessage}; ops_evidence_write_failed fail_state_write_failed=${failStateWrite.error ?? 'unknown'} primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+        );
+      }
 
       if (nextFailures <= maxFailOpen) {
         console.warn(
@@ -436,15 +460,18 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
       }
 
       throw new Error(
-        `[strict] ${gateMessage}; ops_evidence_write_failed primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+        `[strict] ${gateMessage}; ops_evidence_write_failed fail_state_write_failed=none primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
       );
     }
 
-    writeStrictEvidenceFailState({
+    const resetResult = tryWriteStrictEvidenceFailState({
       schemaVersion: 1,
       consecutiveFailures: 0,
       updatedAt: new Date().toISOString()
     });
+    if (!resetResult.ok) {
+      console.warn(`[strict] ${gateMessage}; fail-state reset failed: ${resetResult.error ?? 'unknown'}`);
+    }
     throw new Error(`[strict] ${gateMessage}`);
   }
 

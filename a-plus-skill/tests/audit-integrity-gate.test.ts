@@ -196,7 +196,7 @@ describe('audit integrity verification + gate policy', () => {
     expect(fastPlan.notes.join(' ')).toContain('audit_integrity=failed');
   });
 
-  it('strict evidence write failure is buffered within resilience window', async () => {
+  it('strict evidence write failure is fail-closed with explicit message when fail-state write throws', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'audit-strict-fail-state-'));
     const prevCwd = process.cwd();
     process.chdir(tempDir);
@@ -208,12 +208,20 @@ describe('audit integrity verification + gate policy', () => {
         ...actual,
         appendFileSync: vi.fn(() => {
           throw new Error('disk full');
+        }),
+        writeFileSync: vi.fn((path: Parameters<typeof actual.writeFileSync>[0], ...args: unknown[]) => {
+          if (String(path).includes('strict-evidence-fail-state.json')) {
+            const err = new Error('EACCES: permission denied, open strict fail state');
+            (err as Error & { code?: string }).code = 'EACCES';
+            throw err;
+          }
+          return (actual.writeFileSync as (...inner: unknown[]) => unknown)(path, ...args);
         })
       };
     });
 
     try {
-      const { enforceAuditIntegrityPolicy: mockedEnforce, parseStrictEvidenceFailOpenMax: parseMax } = await import('../src/index.js');
+      const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
       const failedIntegrity = {
         ok: false,
         line: 7,
@@ -222,18 +230,52 @@ describe('audit integrity verification + gate policy', () => {
         lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
       } as const;
 
-      expect(parseMax(undefined)).toBe(2);
-      expect(() => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/\[strict\]/);
-      expect(() => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/\[strict\]/);
-
-      const third = () => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
-      expect(third).toThrow(/ops_evidence_write_failed/);
+      const run = () => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
+      expect(run).toThrow(/ops_evidence_write_failed/);
+      expect(run).toThrow(/fail_state_write_failed=.*EACCES/);
     } finally {
       vi.doUnmock('node:fs');
       vi.resetModules();
       process.chdir(prevCwd);
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('keeps strict base gate error when fail-state reset fails', async () => {
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        writeFileSync: vi.fn((path: Parameters<typeof actual.writeFileSync>[0], ...args: unknown[]) => {
+          if (String(path).includes('strict-evidence-fail-state.json')) {
+            const err = new Error('EPERM: operation not permitted');
+            (err as Error & { code?: string }).code = 'EPERM';
+            throw err;
+          }
+          return (actual.writeFileSync as (...inner: unknown[]) => unknown)(path, ...args);
+        })
+      };
+    });
+
+    const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failedIntegrity = {
+      ok: false,
+      line: 11,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+    } as const;
+
+    const run = () => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
+    expect(run).toThrow(/^\[strict\] install audit integrity check failed/);
+    expect(run).not.toThrow(/ops_evidence_write_failed/);
+    expect(warn.mock.calls.some((args) => String(args[0] ?? '').includes('fail-state reset failed'))).toBe(true);
+
+    warn.mockRestore();
+    vi.doUnmock('node:fs');
+    vi.resetModules();
   });
 
   it('keeps balanced demote + warns stronger when ops evidence primary/fallback both fail', async () => {
