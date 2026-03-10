@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -7,6 +7,7 @@ import {
   INSTALL_AUDIT_SCHEMA_VERSION,
   computeInstallAuditHash,
   getInstallAuditAnchorPath,
+  getInstallAuditBootstrapMarkerPath,
   verifyInstallAuditFile,
   verifyInstallAuditLines
 } from '../src/install/auditIntegrity.js';
@@ -73,7 +74,7 @@ describe('audit integrity verification + gate policy', () => {
     expect(result.reason).toContain('malformed JSON');
   });
 
-  it('treats missing audit file + missing anchor as bootstrap success', () => {
+  it('treats missing audit+anchor+marker as first bootstrap success', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
     const missingPath = join(tempDir, 'install-events.jsonl');
 
@@ -85,31 +86,31 @@ describe('audit integrity verification + gate policy', () => {
       expect(result.reason).toContain('bootstrap');
       expect(result.reason).toContain('ENOENT');
       expect(result.reason).toContain('anchor missing');
+      expect(result.reason).toContain('marker missing');
       expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).not.toThrow();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
-  it('fails verify when audit file is missing but anchor exists', () => {
+  it('fails verify when marker exists but audit+anchor are missing (bootstrap re-entry blocked)', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
     const missingPath = join(tempDir, 'install-events.jsonl');
-    const anchorPath = getInstallAuditAnchorPath(missingPath);
+    const markerPath = getInstallAuditBootstrapMarkerPath(missingPath);
 
     try {
-      writeFileSync(anchorPath, JSON.stringify({ createdAt: '2026-01-01T00:00:00.000Z', schemaVersion: 1 }), 'utf8');
+      writeFileSync(markerPath, JSON.stringify({ createdAt: '2026-01-01T00:00:00.000Z', schemaVersion: 1 }), 'utf8');
       const result = verifyInstallAuditFile(missingPath);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('anchor exists');
+      expect(result.reason).toContain('bootstrap re-entry blocked');
+      expect(result.reason).toContain('marker exists');
       expect(result.reason).toContain('ENOENT');
-
-      expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).toThrow(/\[strict\]/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
-  it('enforces strict/balanced/fast gate behavior', () => {
+  it('enforces strict/balanced/fast gate behavior and records strict/balanced ops events', () => {
     const failedIntegrity = {
       ok: false,
       line: 3,
@@ -118,9 +119,31 @@ describe('audit integrity verification + gate policy', () => {
       lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
     } as const;
 
-    expect(() => enforceAuditIntegrityPolicy('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(
-      /\[strict\]/
-    );
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-ops-'));
+    const prevCwd = process.cwd();
+    process.chdir(tempDir);
+
+    try {
+      expect(() => enforceAuditIntegrityPolicy('strict', failedIntegrity, '/tmp/install-events.jsonl')).toThrow(/\[strict\]/);
+      enforceAuditIntegrityPolicy('balanced', failedIntegrity, '/tmp/install-events.jsonl');
+
+      const opsPath = join(tempDir, 'data', 'install-ops-events.jsonl');
+      const events = readFileSync(opsPath, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+      expect(events).toHaveLength(2);
+      expect(events[0]?.policy).toBe('strict');
+      expect(events[0]?.action).toBe('abort');
+      expect(events[1]?.policy).toBe('balanced');
+      expect(events[1]?.action).toBe('demote');
+      expect(events[1]?.line).toBe(3);
+      expect(events[1]?.auditPath).toBe('/tmp/install-events.jsonl');
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
 
     const base = planInstallAction('balanced', 'recommend', {});
     const balancedPlan = applyAuditIntegrityGate('balanced', base, failedIntegrity);

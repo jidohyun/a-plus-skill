@@ -10,8 +10,9 @@ import {
   parseInstallCommandTimeoutMs,
   runInstall
 } from '../src/install/openclawInstaller.js';
-import { getInstallAuditAnchorPath } from '../src/install/auditIntegrity.js';
+import { getInstallAuditAnchorPath, getInstallAuditBootstrapMarkerPath } from '../src/install/auditIntegrity.js';
 import {
+  applyFastAuditFailInstallCap,
   parseInstallTimeoutRecoveryDelayMs,
   shouldRecoverAfterInstallTimeout,
   waitForInstallTimeoutRecovery
@@ -98,6 +99,7 @@ afterEach(() => {
   delete process.env.INSTALL_COMMAND_TIMEOUT_MS;
   delete process.env.INSTALL_TIMEOUT_RECOVERY_DELAY_MS;
   delete process.env.INSTALL_AUDIT_LOG_PATH;
+  delete process.env.FAST_AUDIT_FAIL_MAX_INSTALLS;
 });
 
 describe('install flow', () => {
@@ -327,6 +329,26 @@ describe('install flow', () => {
     expect(parseInstallTimeoutRecoveryDelayMs('0')).toBe(0);
   });
 
+  it('applies fast audit-failure install cap and demotes over-cap installs to skip', () => {
+    process.env.FAST_AUDIT_FAIL_MAX_INSTALLS = '2';
+    const failedIntegrity = {
+      ok: false,
+      line: 9,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: 'genesis'
+    } as const;
+
+    const base = planInstallAction('fast', 'recommend', {});
+    const withinCap = applyFastAuditFailInstallCap('fast', base, failedIntegrity, 2);
+    expect(withinCap.canInstall).toBe(true);
+
+    const overCap = applyFastAuditFailInstallCap('fast', base, failedIntegrity, 3);
+    expect(overCap.canInstall).toBe(false);
+    expect(overCap.action).toBe('skip-install');
+    expect(overCap.notes.join(' ')).toContain('fast install cap exceeded (3/2)');
+  });
+
   it('writes audit event for canInstall=false path', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
     const logPath = join(dir, 'events.jsonl');
@@ -347,7 +369,7 @@ describe('install flow', () => {
     expect(event.errorCode).toBeUndefined();
   });
 
-  it('creates audit anchor file after successful audit append', async () => {
+  it('creates audit anchor + bootstrapped marker files after successful audit append', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
     const logPath = join(dir, 'events.jsonl');
     process.env.INSTALL_AUDIT_LOG_PATH = logPath;
@@ -363,6 +385,13 @@ describe('install flow', () => {
     const anchor = JSON.parse(readFileSync(anchorPath, 'utf8')) as Record<string, unknown>;
     expect(typeof anchor.createdAt).toBe('string');
     expect(anchor.schemaVersion).toBe(1);
+
+    const markerPath = getInstallAuditBootstrapMarkerPath(logPath);
+    expect(existsSync(markerPath)).toBe(true);
+
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>;
+    expect(typeof marker.createdAt).toBe('string');
+    expect(marker.schemaVersion).toBe(1);
   });
 
   it('warns and avoids fail-open append when anchor create fails with non-EEXIST error', async () => {

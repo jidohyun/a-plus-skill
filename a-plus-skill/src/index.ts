@@ -1,3 +1,4 @@
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -68,6 +69,68 @@ export async function waitForInstallTimeoutRecovery(
   return delayMs;
 }
 
+export function parseFastAuditFailMaxInstalls(raw = process.env.FAST_AUDIT_FAIL_MAX_INSTALLS): number {
+  const defaultCap = 3;
+  const minCap = 1;
+  const maxCap = 20;
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+    return defaultCap;
+  }
+  const rounded = Math.floor(parsed);
+  return Math.max(minCap, Math.min(maxCap, rounded));
+}
+
+export function appendInstallOpsEvent(event: {
+  policy: Policy;
+  reason: string;
+  line: number;
+  action: 'abort' | 'demote';
+  auditPath: string;
+}): void {
+  try {
+    const filePath = resolve(process.cwd(), 'data', 'install-ops-events.jsonl');
+    mkdirSync(dirname(filePath), { recursive: true });
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        ...event
+      })}\n`,
+      'utf8'
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[install-ops] failed to append ops event: ${reason}`);
+  }
+}
+
+export function applyFastAuditFailInstallCap(
+  policy: Policy,
+  installPlan: InstallPlan,
+  auditIntegrity: InstallAuditVerifyResult,
+  installCountOnAuditFailure: number,
+  maxInstallsOnAuditFailure = parseFastAuditFailMaxInstalls()
+): InstallPlan {
+  if (policy !== 'fast' || auditIntegrity.ok || !installPlan.canInstall) {
+    return installPlan;
+  }
+
+  if (installCountOnAuditFailure <= maxInstallsOnAuditFailure) {
+    return installPlan;
+  }
+
+  return {
+    ...installPlan,
+    action: 'skip-install',
+    canInstall: false,
+    notes: [
+      ...installPlan.notes,
+      `audit integrity gate: fast install cap exceeded (${installCountOnAuditFailure}/${maxInstallsOnAuditFailure}), demoted to skip-install`
+    ]
+  };
+}
+
 export function toAuditIntegrityNotes(result: InstallAuditVerifyResult): string[] {
   if (result.ok) {
     return ['audit_integrity=ok'];
@@ -115,10 +178,24 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
 
   const gateMessage = `install audit integrity check failed (path=${auditPath}, line=${auditIntegrity.line}, reason=${auditIntegrity.reason})`;
   if (policy === 'strict') {
+    appendInstallOpsEvent({
+      policy,
+      reason: auditIntegrity.reason,
+      line: auditIntegrity.line,
+      action: 'abort',
+      auditPath
+    });
     throw new Error(`[strict] ${gateMessage}`);
   }
 
   if (policy === 'balanced') {
+    appendInstallOpsEvent({
+      policy,
+      reason: auditIntegrity.reason,
+      line: auditIntegrity.line,
+      action: 'demote',
+      auditPath
+    });
     console.warn(`[balanced] ${gateMessage}; demoting all installs to skip-install`);
   } else {
     console.warn(`[fast] ${gateMessage}; proceeding with warning`);
@@ -138,6 +215,8 @@ export async function main() {
   enforceAuditIntegrityPolicy(policy, auditIntegrity, auditPath);
 
   const results: RecommendationResult[] = [];
+  const fastAuditFailMaxInstalls = parseFastAuditFailMaxInstalls();
+  let fastAuditFailInstallCount = 0;
 
   for (let i = 0; i < skills.length; i += 1) {
     const s = skills[i]!;
@@ -158,7 +237,17 @@ export async function main() {
       degraded: meta.degraded
     });
 
-    const installPlan = applyAuditIntegrityGate(policy, installPlanBase, auditIntegrity);
+    const installPlanWithGate = applyAuditIntegrityGate(policy, installPlanBase, auditIntegrity);
+    if (policy === 'fast' && !auditIntegrity.ok && installPlanWithGate.canInstall) {
+      fastAuditFailInstallCount += 1;
+    }
+    const installPlan = applyFastAuditFailInstallCap(
+      policy,
+      installPlanWithGate,
+      auditIntegrity,
+      fastAuditFailInstallCount,
+      fastAuditFailMaxInstalls
+    );
 
     const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
     if (meta.degraded) {

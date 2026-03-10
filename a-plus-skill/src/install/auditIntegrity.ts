@@ -56,6 +56,10 @@ export function getInstallAuditAnchorPath(auditPath = getInstallAuditPath()): st
   return `${auditPath}.anchor`;
 }
 
+export function getInstallAuditBootstrapMarkerPath(auditPath = getInstallAuditPath()): string {
+  return `${auditPath}.bootstrapped`;
+}
+
 export function verifyInstallAuditLines(lines: string[]): InstallAuditVerifyResult {
   let expectedPrevHash = INSTALL_AUDIT_GENESIS_PREV_HASH;
   let verifiedCount = 0;
@@ -115,14 +119,22 @@ export function verifyInstallAuditFile(filePath = getInstallAuditPath()): Instal
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
       const anchorPath = getInstallAuditAnchorPath(filePath);
-      if (!existsSync(anchorPath)) {
+      const markerPath = getInstallAuditBootstrapMarkerPath(filePath);
+      const anchorExists = existsSync(anchorPath);
+      const markerExists = existsSync(markerPath);
+
+      if (!anchorExists && !markerExists) {
         return {
           ok: true,
           line: 0,
-          reason: 'bootstrap: audit file missing (ENOENT) and anchor missing',
+          reason: 'bootstrap: audit file missing (ENOENT), anchor missing, marker missing',
           verifiedCount: 0,
           lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
         };
+      }
+
+      if (!anchorExists && markerExists) {
+        return fail(0, `bootstrap re-entry blocked: audit file missing (ENOENT), anchor missing, marker exists (${markerPath})`);
       }
 
       return fail(0, `audit file missing (ENOENT) while anchor exists (${anchorPath})`);
