@@ -13,6 +13,7 @@
     "delivery:failures": "node scripts/delivery-failure-summary.mjs",
     "collector:status": "node --import tsx scripts/collector-status.mjs",
     "audit:verify": "node --import tsx scripts/install-audit-verify.ts",
+    "ops:status": "node --import tsx scripts/ops-status.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

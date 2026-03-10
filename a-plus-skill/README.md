@@ -220,6 +220,27 @@ npm run audit:verify
 INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 ```
 
+#### 운영 상태 점검 (`ops:status`)
+```bash
+# 운영 상태 단일 라인 점검 (key=value)
+npm run ops:status
+
+# strict 모드: overall=unhealthy면 exit 2
+npm run ops:status -- --strict
+```
+
+출력 필드:
+- `policy`
+- `audit_ok`, `audit_reason`, `audit_line`
+- `strict_failures`, `strict_state_fault`
+- `fast_cap_count`, `fast_cap_cap`, `fast_cap_tampered`
+- `overall` (`healthy|degraded|unhealthy`)
+
+판단 규칙:
+- `strict`: audit 실패 또는 strict state fault면 `unhealthy`
+- `balanced`: audit 실패는 `degraded`, strict state fault도 `degraded`
+- `fast`: audit 실패는 허용 가능, 단 `fast_cap_tampered=true` 또는 cap 초과면 `unhealthy`
+
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
 - 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`
 - Bootstrap/anchor/marker/fuse/latch 동작:
