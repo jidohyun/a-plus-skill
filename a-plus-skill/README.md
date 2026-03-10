@@ -225,8 +225,11 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 # 운영 상태 단일 라인 점검 (key=value)
 npm run ops:status
 
-# strict 모드: overall=unhealthy면 exit 2
+# strict 모드(기본 nonhealthy): overall!=healthy면 exit 2
 npm run ops:status -- --strict
+
+# 하위 호환 모드: unhealthy일 때만 exit 2
+npm run ops:status -- --strict=unhealthy
 ```
 
 출력 필드:
@@ -234,12 +237,18 @@ npm run ops:status -- --strict
 - `audit_ok`, `audit_reason`, `audit_line`
 - `strict_failures`, `strict_state_fault`
 - `fast_cap_count`, `fast_cap_cap`, `fast_cap_tampered`
+- `critical_flags_present` (`true|false`)
+- `critical_flags` (comma-separated: `fast_cap_tampered`, `strict_state_fault`, `audit_failed`)
 - `overall` (`healthy|degraded|unhealthy`)
 
 판단 규칙:
-- `strict`: audit 실패 또는 strict state fault면 `unhealthy`
-- `balanced`: audit 실패는 `degraded`, strict state fault도 `degraded`
+- `strict`: audit 실패 또는 strict state fault 또는 `fast_cap_tampered=true`면 `unhealthy`
+- `balanced`: audit 실패/strict state fault/strict failures/`fast_cap_tampered=true`면 `degraded`
 - `fast`: audit 실패는 허용 가능, 단 `fast_cap_tampered=true` 또는 cap 초과면 `unhealthy`
+
+`--strict` 종료 규약:
+- `--strict`(기본 `nonhealthy`): `overall=degraded|unhealthy`면 exit `2`
+- `--strict=unhealthy`: `overall=unhealthy`일 때만 exit `2`
 
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
 - 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`

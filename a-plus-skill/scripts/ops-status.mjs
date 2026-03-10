@@ -12,9 +12,24 @@ const fastCapStatePath = process.env.OPS_FAST_CAP_STATE_PATH?.trim() || resolve(
 const fastCapKeyPath = process.env.OPS_FAST_CAP_KEY_PATH?.trim() || resolve(dirname(fastCapStatePath), 'fast-audit-fail-cap.key');
 
 function parseArgs(argv = process.argv.slice(2)) {
-  return {
-    strict: argv.includes('--strict')
-  };
+  let strictMode = null;
+
+  for (const arg of argv) {
+    if (arg === '--strict') {
+      strictMode = 'nonhealthy';
+      continue;
+    }
+    if (arg.startsWith('--strict=')) {
+      const value = arg.slice('--strict='.length).trim();
+      if (value === 'unhealthy') {
+        strictMode = 'unhealthy';
+      } else {
+        strictMode = 'nonhealthy';
+      }
+    }
+  }
+
+  return { strictMode };
 }
 
 function readStrictEvidenceState(path) {
@@ -114,13 +129,13 @@ function main() {
   let overall = 'healthy';
 
   if (policy === 'strict') {
-    if (!audit.ok || strictState.fault) {
+    if (!audit.ok || strictState.fault || fastCap.tampered) {
       overall = 'unhealthy';
     } else if (strictState.failures > 0) {
       overall = 'degraded';
     }
   } else if (policy === 'balanced') {
-    if (!audit.ok || strictState.fault || strictState.failures > 0) {
+    if (!audit.ok || strictState.fault || strictState.failures > 0 || fastCap.tampered) {
       overall = 'degraded';
     }
   } else {
@@ -129,6 +144,17 @@ function main() {
     } else if (strictState.fault || strictState.failures > 0) {
       overall = 'degraded';
     }
+  }
+
+  const criticalFlags = [];
+  if (fastCap.tampered) {
+    criticalFlags.push('fast_cap_tampered');
+  }
+  if (strictState.fault) {
+    criticalFlags.push('strict_state_fault');
+  }
+  if (!audit.ok) {
+    criticalFlags.push('audit_failed');
   }
 
   const fields = [
@@ -141,13 +167,18 @@ function main() {
     `fast_cap_count=${fastCap.count}`,
     `fast_cap_cap=${cap}`,
     `fast_cap_tampered=${fastCap.tampered}`,
+    `critical_flags_present=${criticalFlags.length > 0}`,
+    `critical_flags=${q(criticalFlags.join(','))}`,
     `overall=${overall}`
   ];
 
   console.log(fields.join(' '));
 
-  if (args.strict && overall === 'unhealthy') {
-    process.exit(2);
+  if (args.strictMode) {
+    const fail = args.strictMode === 'unhealthy' ? overall === 'unhealthy' : overall !== 'healthy';
+    if (fail) {
+      process.exit(2);
+    }
   }
 }
 
