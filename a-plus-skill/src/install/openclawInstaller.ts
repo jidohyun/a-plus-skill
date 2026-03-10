@@ -369,6 +369,7 @@ function writeInstallAuditAnchorIfMissing(file: string): void {
     if (code === 'EEXIST') {
       return;
     }
+    throw error;
   }
 }
 
@@ -392,8 +393,8 @@ export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | '
       hash: computeInstallAuditHash(payload)
     };
 
-    appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');
     writeInstallAuditAnchorIfMissing(file);
+    appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[install-audit] failed to append JSONL event: ${sanitizeSensitiveText(reason)}`);

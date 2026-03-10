@@ -365,6 +365,43 @@ describe('install flow', () => {
     expect(anchor.schemaVersion).toBe(1);
   });
 
+  it('warns and avoids fail-open append when anchor create fails with non-EEXIST error', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        writeFileSync: vi.fn((path: Parameters<typeof actual.writeFileSync>[0], data: Parameters<typeof actual.writeFileSync>[1], options?: Parameters<typeof actual.writeFileSync>[2]) => {
+          if (String(path).endsWith('.anchor')) {
+            const error = new Error('mock anchor write failure') as Error & { code?: string };
+            error.code = 'EACCES';
+            throw error;
+          }
+          return actual.writeFileSync(path, data, options as never);
+        })
+      };
+    });
+
+    const { runInstall: mockedRunInstall } = await import('../src/install/openclawInstaller.js');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plan = planInstallAction('balanced', 'recommend', {});
+    const outcome = await mockedRunInstall('demo/anchor-fail', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    expect(outcome.status).toBe('installed');
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.some((args) => String(args[0] ?? '').includes('mock anchor write failure'))).toBe(true);
+    expect(existsSync(logPath)).toBe(false);
+
+    warn.mockRestore();
+    vi.doUnmock('node:fs');
+    vi.resetModules();
+  });
+
   it('writes success/failure/timeout audit fields', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
     const logPath = join(dir, 'events.jsonl');
