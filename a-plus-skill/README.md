@@ -222,6 +222,10 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
 - 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`
+- Bootstrap/anchor 동작:
+  - 최초 1회(감사 로그 파일 + `.anchor` 모두 없음)만 bootstrap 성공으로 허용됩니다.
+  - 감사 로그 append 성공 직후 `${INSTALL_AUDIT_LOG_PATH}.anchor`(기본 `${auditPath}.anchor`)가 생성됩니다.
+  - 이후 로그 파일이 ENOENT여도 anchor가 있으면 무결성 실패로 처리되어 strict 우회가 불가합니다.
 - 런타임 설치 경로 연동 게이트(설치 루프 시작 전 자동 검증):
   - `strict`: 무결성 실패 시 즉시 fail-fast (설치 중단)
   - `balanced`: 설치 action을 `skip-install`로 강등하고 `notes`에 사유(line/reason) 기록

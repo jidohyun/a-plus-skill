@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { InstallAuditEvent } from '../types/index.js';
 
@@ -50,6 +50,10 @@ export function getInstallAuditPath(cwd = process.cwd(), rawPath = process.env.I
     return resolve(cwd, customPath);
   }
   return resolve(cwd, 'data', 'install-events.jsonl');
+}
+
+export function getInstallAuditAnchorPath(auditPath = getInstallAuditPath()): string {
+  return `${auditPath}.anchor`;
 }
 
 export function verifyInstallAuditLines(lines: string[]): InstallAuditVerifyResult {
@@ -110,13 +114,18 @@ export function verifyInstallAuditFile(filePath = getInstallAuditPath()): Instal
     content = readFileSync(filePath, 'utf8');
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
-      return {
-        ok: true,
-        line: 0,
-        reason: 'bootstrap: audit file missing (ENOENT)',
-        verifiedCount: 0,
-        lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
-      };
+      const anchorPath = getInstallAuditAnchorPath(filePath);
+      if (!existsSync(anchorPath)) {
+        return {
+          ok: true,
+          line: 0,
+          reason: 'bootstrap: audit file missing (ENOENT) and anchor missing',
+          verifiedCount: 0,
+          lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+        };
+      }
+
+      return fail(0, `audit file missing (ENOENT) while anchor exists (${anchorPath})`);
     }
 
     const reason = error instanceof Error ? error.message : String(error);

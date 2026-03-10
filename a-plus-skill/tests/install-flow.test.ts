@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
@@ -10,6 +10,7 @@ import {
   parseInstallCommandTimeoutMs,
   runInstall
 } from '../src/install/openclawInstaller.js';
+import { getInstallAuditAnchorPath } from '../src/install/auditIntegrity.js';
 import {
   parseInstallTimeoutRecoveryDelayMs,
   shouldRecoverAfterInstallTimeout,
@@ -344,6 +345,24 @@ describe('install flow', () => {
     expect(event.canInstall).toBe(false);
     expect(event.status).toBe('skipped');
     expect(event.errorCode).toBeUndefined();
+  });
+
+  it('creates audit anchor file after successful audit append', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'install-audit-'));
+    const logPath = join(dir, 'events.jsonl');
+    process.env.INSTALL_AUDIT_LOG_PATH = logPath;
+
+    const plan = planInstallAction('balanced', 'recommend', {});
+    const outcome = await runInstall('demo/skill', plan, async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+
+    expect(outcome.status).toBe('installed');
+
+    const anchorPath = getInstallAuditAnchorPath(logPath);
+    expect(existsSync(anchorPath)).toBe(true);
+
+    const anchor = JSON.parse(readFileSync(anchorPath, 'utf8')) as Record<string, unknown>;
+    expect(typeof anchor.createdAt).toBe('string');
+    expect(anchor.schemaVersion).toBe(1);
   });
 
   it('writes success/failure/timeout audit fields', async () => {

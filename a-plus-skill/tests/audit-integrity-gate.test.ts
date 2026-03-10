@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import {
   INSTALL_AUDIT_GENESIS_PREV_HASH,
   INSTALL_AUDIT_SCHEMA_VERSION,
   computeInstallAuditHash,
+  getInstallAuditAnchorPath,
   verifyInstallAuditFile,
   verifyInstallAuditLines
 } from '../src/install/auditIntegrity.js';
@@ -72,7 +73,7 @@ describe('audit integrity verification + gate policy', () => {
     expect(result.reason).toContain('malformed JSON');
   });
 
-  it('treats missing audit file (ENOENT) as bootstrap success', () => {
+  it('treats missing audit file + missing anchor as bootstrap success', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
     const missingPath = join(tempDir, 'install-events.jsonl');
 
@@ -83,18 +84,26 @@ describe('audit integrity verification + gate policy', () => {
       expect(result.lastHash).toBe(INSTALL_AUDIT_GENESIS_PREV_HASH);
       expect(result.reason).toContain('bootstrap');
       expect(result.reason).toContain('ENOENT');
+      expect(result.reason).toContain('anchor missing');
+      expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).not.toThrow();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
-  it('does not throw in strict policy on bootstrap verify result', () => {
+  it('fails verify when audit file is missing but anchor exists', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
     const missingPath = join(tempDir, 'install-events.jsonl');
+    const anchorPath = getInstallAuditAnchorPath(missingPath);
 
     try {
+      writeFileSync(anchorPath, JSON.stringify({ createdAt: '2026-01-01T00:00:00.000Z', schemaVersion: 1 }), 'utf8');
       const result = verifyInstallAuditFile(missingPath);
-      expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).not.toThrow();
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('anchor exists');
+      expect(result.reason).toContain('ENOENT');
+
+      expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).toThrow(/\[strict\]/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

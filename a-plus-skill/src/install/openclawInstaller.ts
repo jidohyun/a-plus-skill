@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
 import {
   INSTALL_AUDIT_GENESIS_PREV_HASH,
   INSTALL_AUDIT_SCHEMA_VERSION,
   computeInstallAuditHash,
+  getInstallAuditAnchorPath,
   getInstallAuditPath
 } from './auditIntegrity.js';
 import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
@@ -354,6 +355,23 @@ function readPreviousAuditHash(file: string): string {
   return INSTALL_AUDIT_GENESIS_PREV_HASH;
 }
 
+function writeInstallAuditAnchorIfMissing(file: string): void {
+  const anchorPath = getInstallAuditAnchorPath(file);
+  const anchor = {
+    createdAt: new Date().toISOString(),
+    schemaVersion: INSTALL_AUDIT_SCHEMA_VERSION
+  };
+
+  try {
+    writeFileSync(anchorPath, `${JSON.stringify(anchor)}\n`, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
+    if (code === 'EEXIST') {
+      return;
+    }
+  }
+}
+
 export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | 'prevHash' | 'eventId' | 'schemaVersion'>): void {
   let releaseLock: (() => void) | undefined;
 
@@ -375,6 +393,7 @@ export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | '
     };
 
     appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');
+    writeInstallAuditAnchorIfMissing(file);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[install-audit] failed to append JSONL event: ${sanitizeSensitiveText(reason)}`);
