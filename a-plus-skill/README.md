@@ -228,6 +228,9 @@ npm run ops:status
 # strict 모드(기본 unhealthy): overall=unhealthy일 때만 exit 2
 npm run ops:status -- --strict
 
+# 운영 기본 권장 게이트 (nonhealthy): overall=degraded|unhealthy면 exit 2
+npm run ops:status:gate
+
 # 확장 strict 모드: overall=degraded|unhealthy면 exit 2
 npm run ops:status -- --strict=nonhealthy
 
@@ -250,9 +253,11 @@ npm run ops:status -- --strict=unhealthy
 - `fast`: audit 실패는 허용 가능, 단 `fast_cap_tampered=true` 또는 cap 초과면 `unhealthy`
 
 `--strict` 종료 규약:
+- 유효 strict mode: `unhealthy | nonhealthy`
 - `--strict`(기본 `unhealthy`): `overall=unhealthy`일 때만 exit `2`
 - `--strict=nonhealthy`: `overall=degraded|unhealthy`면 exit `2`
 - `--strict=unhealthy`: `overall=unhealthy`일 때만 exit `2`
+- invalid mode(`--strict=<...>`)는 fallback 없이 즉시 stderr 오류 출력 후 exit `2`
 
 - 성공: `OK verified=<count> lastHash=<hash> path=...` 출력, exit code `0`
 - 실패: `ERROR line=<line> reason=<이유> path=...` 출력, exit code `!= 0`

@@ -13,6 +13,7 @@ const fastCapKeyPath = process.env.OPS_FAST_CAP_KEY_PATH?.trim() || resolve(dirn
 
 function parseArgs(argv = process.argv.slice(2)) {
   let strictMode = null;
+  let strictModeError = null;
 
   for (const arg of argv) {
     if (arg === '--strict') {
@@ -26,13 +27,12 @@ function parseArgs(argv = process.argv.slice(2)) {
       } else if (value === 'unhealthy') {
         strictMode = 'unhealthy';
       } else {
-        console.warn(`WARN unknown --strict mode ${q(value)}; fallback to "unhealthy"`);
-        strictMode = 'unhealthy';
+        strictModeError = value;
       }
     }
   }
 
-  return { strictMode };
+  return { strictMode, strictModeError };
 }
 
 function readStrictEvidenceState(path) {
@@ -119,6 +119,13 @@ function q(value) {
 
 function main() {
   const args = parseArgs();
+  if (args.strictModeError !== null) {
+    console.error(
+      `ERROR invalid --strict mode ${q(args.strictModeError)}; expected one of: "unhealthy", "nonhealthy"`
+    );
+    process.exit(2);
+  }
+
   const policy = loadPolicyFromEnv('balanced');
 
   const auditPath = getInstallAuditPath();

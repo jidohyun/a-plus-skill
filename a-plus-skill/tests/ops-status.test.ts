@@ -259,18 +259,14 @@ describe('ops-status script', () => {
     }
   });
 
-  it('unknown --strict mode warns and falls back to unhealthy semantics', () => {
+  it('unknown --strict mode fails immediately with exit 2', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ops-status-strict-unknown-mode-'));
     try {
-      const statePath = join(dir, 'data', 'strict-evidence-fail-state.json');
-      mkdirSync(join(dir, 'data'), { recursive: true });
-      writeFileSync(statePath, `${JSON.stringify({ consecutiveFailures: 1 })}\n`, 'utf8');
-
       const result = runStatus(['--strict=weird-mode'], { INSTALL_POLICY: 'strict' }, dir);
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain('WARN unknown --strict mode');
-      const out = parseLine(result.stdout);
-      expect(out.overall).toBe('degraded');
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain('ERROR invalid --strict mode');
+      expect(result.stderr).toContain('expected one of: "unhealthy", "nonhealthy"');
+      expect(result.stdout.trim()).toBe('');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
