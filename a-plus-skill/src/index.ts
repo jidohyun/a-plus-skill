@@ -145,14 +145,20 @@ type StrictEvidenceFailStateWriteResult = {
   error?: string;
 };
 
-function withFileLock(lockPath: string, fn: () => void): void {
+type StrictEvidenceFailStateReadResult = {
+  ok: boolean;
+  state?: StrictEvidenceFailState;
+  fault?: string;
+};
+
+function withFileLock<T>(lockPath: string, fn: () => T): T {
   const deadline = Date.now() + FAST_AUDIT_FAIL_CAP_LOCK_TIMEOUT_MS;
 
   while (Date.now() <= deadline) {
     try {
       const fd = openSync(lockPath, 'wx');
       try {
-        fn();
+        return fn();
       } finally {
         try {
           closeSync(fd);
@@ -165,7 +171,6 @@ function withFileLock(lockPath: string, fn: () => void): void {
           // best effort
         }
       }
-      return;
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
       if (code !== 'EEXIST') {
@@ -200,35 +205,91 @@ function ensureFastAuditCapKey(keyPath = FAST_AUDIT_FAIL_CAP_KEY_PATH): string {
   }
 }
 
-function readStrictEvidenceFailState(path = STRICT_EVIDENCE_FAIL_STATE_PATH): StrictEvidenceFailState {
+function readStrictEvidenceFailStateUnlocked(path = STRICT_EVIDENCE_FAIL_STATE_PATH): StrictEvidenceFailStateReadResult {
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<StrictEvidenceFailState>;
+    const raw = readFileSync(path, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<StrictEvidenceFailState>;
     const consecutiveFailures = Number(parsed.consecutiveFailures);
+    if (!Number.isFinite(consecutiveFailures) || consecutiveFailures < 0) {
+      return { ok: false, fault: 'strict_evidence_state_fault=schema_invalid' };
+    }
+
     return {
-      schemaVersion: 1,
-      consecutiveFailures: Number.isFinite(consecutiveFailures) && consecutiveFailures > 0 ? Math.floor(consecutiveFailures) : 0,
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString()
+      ok: true,
+      state: {
+        schemaVersion: 1,
+        consecutiveFailures: Math.floor(consecutiveFailures),
+        updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString()
+      }
     };
-  } catch {
-    return { schemaVersion: 1, consecutiveFailures: 0, updatedAt: new Date(0).toISOString() };
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
+    if (code === 'ENOENT') {
+      return {
+        ok: true,
+        state: { schemaVersion: 1, consecutiveFailures: 0, updatedAt: new Date(0).toISOString() }
+      };
+    }
+
+    if (error instanceof SyntaxError) {
+      return { ok: false, fault: 'strict_evidence_state_fault=parse_error' };
+    }
+
+    return { ok: false, fault: `strict_evidence_state_fault=read_error:${code ?? 'unknown'}` };
   }
 }
 
-function writeStrictEvidenceFailState(state: StrictEvidenceFailState, path = STRICT_EVIDENCE_FAIL_STATE_PATH): void {
+function writeStrictEvidenceFailStateUnlocked(state: StrictEvidenceFailState, path = STRICT_EVIDENCE_FAIL_STATE_PATH): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  const tmpPath = `${path}.tmp.${process.pid}`;
+  writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  renameSync(tmpPath, path);
 }
 
 function tryWriteStrictEvidenceFailState(
   state: StrictEvidenceFailState,
   path = STRICT_EVIDENCE_FAIL_STATE_PATH
 ): StrictEvidenceFailStateWriteResult {
+  const lockPath = `${path}.lock`;
   try {
-    writeStrictEvidenceFailState(state, path);
+    withFileLock(lockPath, () => {
+      writeStrictEvidenceFailStateUnlocked(state, path);
+    });
     return { ok: true };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { ok: false, error: reason };
+  }
+}
+
+function incrementStrictEvidenceFailureState(path = STRICT_EVIDENCE_FAIL_STATE_PATH): {
+  nextFailures?: number;
+  writeError?: string;
+  stateFault?: string;
+} {
+  const lockPath = `${path}.lock`;
+
+  try {
+    return withFileLock(lockPath, () => {
+      const current = readStrictEvidenceFailStateUnlocked(path);
+      if (!current.ok) {
+        return { stateFault: current.fault ?? 'strict_evidence_state_fault=unknown' };
+      }
+
+      const nextFailures = (current.state?.consecutiveFailures ?? 0) + 1;
+      writeStrictEvidenceFailStateUnlocked(
+        {
+          schemaVersion: 1,
+          consecutiveFailures: nextFailures,
+          updatedAt: new Date().toISOString()
+        },
+        path
+      );
+
+      return { nextFailures };
+    });
+  } catch (error) {
+    return { writeError: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -438,29 +499,30 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
   if (policy === 'strict') {
     if (!primaryWrite.ok && !fallbackWrite?.ok) {
       const maxFailOpen = parseStrictEvidenceFailOpenMax();
-      const current = readStrictEvidenceFailState();
-      const nextFailures = current.consecutiveFailures + 1;
-      const failStateWrite = tryWriteStrictEvidenceFailState({
-        schemaVersion: 1,
-        consecutiveFailures: nextFailures,
-        updatedAt: new Date().toISOString()
-      });
+      const strictFailState = incrementStrictEvidenceFailureState();
 
-      if (!failStateWrite.ok) {
+      if (strictFailState.writeError) {
         throw new Error(
-          `[strict] ${gateMessage}; ops_evidence_write_failed fail_state_write_failed=${failStateWrite.error ?? 'unknown'} primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+          `[strict] ${gateMessage}; ops_evidence_write_failed strict_evidence_state_fault=none fail_state_write_failed=${strictFailState.writeError} primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
         );
       }
 
+      if (strictFailState.stateFault) {
+        throw new Error(
+          `[strict] ${gateMessage}; ops_evidence_write_failed ${strictFailState.stateFault} fail_state_write_failed=none primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+        );
+      }
+
+      const nextFailures = strictFailState.nextFailures ?? maxFailOpen + 1;
       if (nextFailures <= maxFailOpen) {
         console.warn(
-          `[strict] ${gateMessage}; ops evidence write failed but within resilience window (${nextFailures}/${maxFailOpen}) primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+          `[strict] ${gateMessage}; evidence-write-failed window=${nextFailures}/${maxFailOpen} primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
         );
         throw new Error(`[strict] ${gateMessage}`);
       }
 
       throw new Error(
-        `[strict] ${gateMessage}; ops_evidence_write_failed fail_state_write_failed=none primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'}`
+        `[strict] ${gateMessage}; ops_evidence_write_failed strict_evidence_state_fault=none fail_state_write_failed=none primary=${primaryWrite.error ?? 'unknown'} fallback=${fallbackWrite?.error ?? 'unknown'} window=${nextFailures}/${maxFailOpen}`
       );
     }
 

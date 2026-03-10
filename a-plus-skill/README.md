@@ -230,7 +230,9 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 - 런타임 설치 경로 연동 게이트(설치 루프 시작 전 자동 검증):
   - `strict`: 무결성 실패 시 즉시 fail-fast (설치 중단) + `data/install-ops-events.jsonl`에 `action=abort` 기록
     - primary/fallback ops evidence 기록이 모두 실패하면 strict gate throw는 유지
-    - 단, `STRICT_EVIDENCE_FAIL_OPEN_MAX`(기본 `2`, clamp `1..5`) 완충 윈도우 이내에서는 `ops_evidence_write_failed`를 경고로만 남기고, 임계치 초과 시 기존과 동일하게 `ops_evidence_write_failed` 포함 hard-fail
+    - strict evidence fail-state(`data/strict-evidence-fail-state.json`)는 lock + temp->rename 원자 갱신으로 관리됩니다.
+    - `STRICT_EVIDENCE_FAIL_OPEN_MAX`(기본 `2`, clamp `1..5`)의 1..N 구간은 경고(`evidence-write-failed`)만 남기고 strict throw를 유지하며, N+1부터는 `ops_evidence_write_failed`로 fail-closed 강화됩니다.
+    - state file read(parse/권한/IO) fault는 0으로 복구하지 않고 즉시 fail-closed로 승격되며, 에러에 `strict_evidence_state_fault=<...>`가 포함됩니다.
   - `balanced`: 설치 action을 `skip-install`로 강등하고 `notes`에 사유(line/reason) 기록 + ops event(`action=demote`) 기록
     - primary 실패 시 fallback 기록 시도, 둘 다 실패하면 경고 로그 강화
   - `fast`: 경고만 기록하고 설치 계속 진행 (`notes`에 `audit_integrity=failed` 포함)

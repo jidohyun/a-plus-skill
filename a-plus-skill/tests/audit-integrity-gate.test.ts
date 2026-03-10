@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
@@ -194,6 +194,143 @@ describe('audit integrity verification + gate policy', () => {
     expect(fastPlan.action).toBe('auto-install');
     expect(fastPlan.canInstall).toBe(true);
     expect(fastPlan.notes.join(' ')).toContain('audit_integrity=failed');
+  });
+
+  it('strict fail-window keeps base throw for 1..N and fail-closes at N+1 with ops tag', async () => {
+    const failedIntegrity = {
+      ok: false,
+      line: 7,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+    } as const;
+
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-strict-window-'));
+    const prevCwd = process.cwd();
+    process.chdir(tempDir);
+    process.env.STRICT_EVIDENCE_FAIL_OPEN_MAX = '2';
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        appendFileSync: vi.fn(() => {
+          throw new Error('disk full');
+        })
+      };
+    });
+
+    try {
+      const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
+
+      const runAndCatch = (): string => {
+        try {
+          mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
+          return '';
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      };
+
+      const first = runAndCatch();
+      const second = runAndCatch();
+      const third = runAndCatch();
+
+      expect(first).toMatch(/^\[strict\] install audit integrity check failed/);
+      expect(first).not.toMatch(/ops_evidence_write_failed/);
+      expect(second).toMatch(/^\[strict\] install audit integrity check failed/);
+      expect(second).not.toMatch(/ops_evidence_write_failed/);
+      expect(third).toMatch(/ops_evidence_write_failed/);
+      expect(third).toMatch(/window=3\/2/);
+
+      const state = JSON.parse(readFileSync(join(tempDir, 'data', 'strict-evidence-fail-state.json'), 'utf8')) as Record<string, unknown>;
+      expect(state.consecutiveFailures).toBe(3);
+    } finally {
+      delete process.env.STRICT_EVIDENCE_FAIL_OPEN_MAX;
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+      process.chdir(prevCwd);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('strict evidence state parse fault is promoted to fail-closed with strict_evidence_state_fault', async () => {
+    const failedIntegrity = {
+      ok: false,
+      line: 7,
+      reason: 'hash mismatch',
+      verifiedCount: 0,
+      lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+    } as const;
+
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-strict-parse-fault-'));
+    const prevCwd = process.cwd();
+    process.chdir(tempDir);
+    mkdirSync(join(tempDir, 'data'), { recursive: true });
+    writeFileSync(join(tempDir, 'data', 'strict-evidence-fail-state.json'), '{broken', 'utf8');
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        appendFileSync: vi.fn(() => {
+          throw new Error('disk full');
+        })
+      };
+    });
+
+    try {
+      const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
+      const run = () => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
+      expect(run).toThrow(/ops_evidence_write_failed/);
+      expect(run).toThrow(/strict_evidence_state_fault=parse_error/);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+      process.chdir(prevCwd);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('strict evidence state read EACCES fault is promoted to fail-closed', async () => {
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        appendFileSync: vi.fn(() => {
+          throw new Error('disk full');
+        }),
+        readFileSync: vi.fn((path: Parameters<typeof actual.readFileSync>[0], ...args: unknown[]) => {
+          if (String(path).includes('strict-evidence-fail-state.json')) {
+            const err = new Error('EACCES: permission denied, open strict fail state');
+            (err as Error & { code?: string }).code = 'EACCES';
+            throw err;
+          }
+          return (actual.readFileSync as (...inner: unknown[]) => unknown)(path, ...args);
+        })
+      };
+    });
+
+    try {
+      const { enforceAuditIntegrityPolicy: mockedEnforce } = await import('../src/index.js');
+      const failedIntegrity = {
+        ok: false,
+        line: 7,
+        reason: 'hash mismatch',
+        verifiedCount: 0,
+        lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+      } as const;
+
+      const run = () => mockedEnforce('strict', failedIntegrity, '/tmp/install-events.jsonl');
+      expect(run).toThrow(/ops_evidence_write_failed/);
+      expect(run).toThrow(/strict_evidence_state_fault=read_error:EACCES/);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
   });
 
   it('strict evidence write failure is fail-closed with explicit message when fail-state write throws', async () => {
