@@ -109,6 +109,16 @@ export function verifyInstallAuditFile(filePath = getInstallAuditPath()): Instal
   try {
     content = readFileSync(filePath, 'utf8');
   } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return {
+        ok: true,
+        line: 0,
+        reason: 'bootstrap: audit file missing (ENOENT)',
+        verifiedCount: 0,
+        lastHash: INSTALL_AUDIT_GENESIS_PREV_HASH
+      };
+    }
+
     const reason = error instanceof Error ? error.message : String(error);
     return fail(0, `failed to read file (${reason})`);
   }

@@ -1,8 +1,12 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
   INSTALL_AUDIT_GENESIS_PREV_HASH,
   INSTALL_AUDIT_SCHEMA_VERSION,
   computeInstallAuditHash,
+  verifyInstallAuditFile,
   verifyInstallAuditLines
 } from '../src/install/auditIntegrity.js';
 import { applyAuditIntegrityGate, enforceAuditIntegrityPolicy } from '../src/index.js';
@@ -66,6 +70,34 @@ describe('audit integrity verification + gate policy', () => {
     const result = verifyInstallAuditLines(['{"broken":']);
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('malformed JSON');
+  });
+
+  it('treats missing audit file (ENOENT) as bootstrap success', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
+    const missingPath = join(tempDir, 'install-events.jsonl');
+
+    try {
+      const result = verifyInstallAuditFile(missingPath);
+      expect(result.ok).toBe(true);
+      expect(result.verifiedCount).toBe(0);
+      expect(result.lastHash).toBe(INSTALL_AUDIT_GENESIS_PREV_HASH);
+      expect(result.reason).toContain('bootstrap');
+      expect(result.reason).toContain('ENOENT');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not throw in strict policy on bootstrap verify result', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'audit-integrity-'));
+    const missingPath = join(tempDir, 'install-events.jsonl');
+
+    try {
+      const result = verifyInstallAuditFile(missingPath);
+      expect(() => enforceAuditIntegrityPolicy('strict', result, missingPath)).not.toThrow();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('enforces strict/balanced/fast gate behavior', () => {
