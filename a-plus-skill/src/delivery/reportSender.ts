@@ -248,6 +248,9 @@ export async function sendWeeklyReport(
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       try {
         await sender(chunk);
+        await logFailure(
+          `event=delivery_success mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS}`
+        );
         chunksSent += 1;
         sent = true;
         break;

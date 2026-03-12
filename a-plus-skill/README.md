@@ -75,6 +75,8 @@ REPORT_DELIVERY=telegram npm run report:send
 - 권장 운영: 외부 `logrotate` 또는 시스템 로거(journald 등)로 순환 관리
 - 선택적 인프로세스 로테이션(비기본): `REPORT_DELIVERY_INLINE_ROTATE=true`일 때만 `data/report-delivery.log.1` 사용
 - 기록 내용: event/chunk 번호/시도 횟수/code/status (lock_mismatch는 `expected`/`actual` 포함)
+  - 성공 시: `event=delivery_success mode=... chunk=.../... attempt=.../...`
+  - 실패 시(기존 호환): `event=delivery_failed ...`
 - 주요 reason
   - `lock_mismatch`: `REPORT_DELIVERY`가 `REPORT_DELIVERY_LOCKED`와 불일치
   - `unsupported REPORT_DELIVERY mode`: 지원하지 않는 전송 모드
@@ -243,14 +245,26 @@ npm run ops:status -- --strict=unhealthy
 - `audit_ok`, `audit_reason`, `audit_line`
 - `strict_failures`, `strict_state_fault`
 - `fast_cap_count`, `fast_cap_cap`, `fast_cap_tampered`
+- `delivery_health` (`healthy|degraded|unhealthy|disabled`)
+- `delivery_last_success_age_sec` (최근 success 이벤트 경과 초, 없으면 `-1`)
+- `delivery_failures`, `delivery_successes`
 - `critical_flags_present` (`true|false`)
 - `critical_flags` (comma-separated: `fast_cap_tampered`, `strict_state_fault`, `audit_failed`)
 - `overall` (`healthy|degraded|unhealthy`)
 
 판단 규칙:
+- delivery 집계 소스: `data/report-delivery.log` + 회전 파일(`data/report-delivery.log.*`)
+- `REPORT_DELIVERY=none`이면 `delivery_health=disabled`이며 overall에 영향 없음
+- delivery 활성화 상태에서 최근 success 없음/성공 신호 stale면
+  - `strict`: `overall=unhealthy`
+  - `balanced`, `fast`: `overall=degraded`
+- 로그 파싱 오류/로그 읽기 문제는 보수적으로 최소 `degraded` 처리
 - `strict`: audit 실패 또는 strict state fault 또는 `fast_cap_tampered=true`면 `unhealthy`
 - `balanced`: audit 실패/strict state fault/strict failures/`fast_cap_tampered=true`면 `degraded`
 - `fast`: audit 실패는 허용 가능, 단 `fast_cap_tampered=true` 또는 cap 초과면 `unhealthy`
+
+운영 팁:
+- delivery stale 임계치 기본값은 `8일`이며, `OPS_DELIVERY_SUCCESS_STALE_SEC`로 조정할 수 있습니다.
 
 `--strict` 종료 규약:
 - 유효 strict mode: `unhealthy | nonhealthy`

@@ -36,6 +36,22 @@ function fastCapChecksum(key: string, schemaVersion: number, count: number, upda
   return createHash('sha256').update(`${schemaVersion}:${count}:${updatedAt}:${key}`, 'utf8').digest('hex');
 }
 
+function writeDeliveryLog(dir: string, lines: string[]): void {
+  const path = join(dir, 'data', 'report-delivery.log');
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${lines.join('\n')}\n`, 'utf8');
+}
+
+function writeDeliveryLogRotated(dir: string, suffix: string, lines: string[]): void {
+  const path = join(dir, 'data', `report-delivery.log.${suffix}`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${lines.join('\n')}\n`, 'utf8');
+}
+
+function isoSecondsAgo(secondsAgo: number): string {
+  return new Date(Date.now() - secondsAgo * 1000).toISOString();
+}
+
 function writeTamperedFastCapState(dir: string): void {
   const dataDir = join(dir, 'data');
   mkdirSync(dataDir, { recursive: true });
@@ -191,6 +207,158 @@ describe('ops-status script', () => {
       const out = parseLine(result.stdout);
       expect(out.critical_flags_present).toBe('true');
       expect(out.critical_flags).toBe('strict_state_fault,audit_failed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('delivery success signal yields healthy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-success-'));
+    try {
+      writeDeliveryLog(dir, [
+        `${isoSecondsAgo(90)} event=delivery_success mode=discord-dm chunk=1/1 attempt=1/3`,
+        `${isoSecondsAgo(120)} event=delivery_failed mode=discord-dm chunk=1/1 attempt=1/3 code=NETWORK_ERROR`
+      ]);
+
+      const result = runStatus([], { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'discord-dm' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.delivery_health).toBe('healthy');
+      expect(out.delivery_successes).toBe('1');
+      expect(out.delivery_failures).toBe('1');
+      expect(Number(out.delivery_last_success_age_sec)).toBeGreaterThanOrEqual(0);
+      expect(out.overall).toBe('healthy');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('delivery failures without success => strict unhealthy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-strict-fail-only-'));
+    try {
+      writeDeliveryLog(dir, [
+        `${isoSecondsAgo(60)} event=delivery_failed mode=discord-dm chunk=1/1 attempt=1/3 code=NETWORK_ERROR`
+      ]);
+
+      const result = runStatus([], { INSTALL_POLICY: 'strict', REPORT_DELIVERY: 'discord-dm' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.delivery_health).toBe('unhealthy');
+      expect(out.delivery_successes).toBe('0');
+      expect(out.overall).toBe('unhealthy');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('delivery failures without success => balanced/fast degraded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-non-strict-fail-only-'));
+    try {
+      writeDeliveryLog(dir, [
+        `${isoSecondsAgo(60)} event=delivery_failed mode=telegram chunk=1/1 attempt=1/3 code=NETWORK_ERROR`
+      ]);
+
+      const balanced = runStatus([], { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'telegram' }, dir);
+      expect(balanced.status).toBe(0);
+      const balancedOut = parseLine(balanced.stdout);
+      expect(balancedOut.delivery_health).toBe('unhealthy');
+      expect(balancedOut.overall).toBe('degraded');
+
+      const fast = runStatus([], { INSTALL_POLICY: 'fast', REPORT_DELIVERY: 'telegram' }, dir);
+      expect(fast.status).toBe(0);
+      const fastOut = parseLine(fast.stdout);
+      expect(fastOut.delivery_health).toBe('unhealthy');
+      expect(fastOut.overall).toBe('degraded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stale delivery success degrades strict to unhealthy and others to degraded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-stale-'));
+    try {
+      writeDeliveryLog(dir, [
+        `${isoSecondsAgo(7200)} event=delivery_success mode=discord-dm chunk=1/1 attempt=1/3`
+      ]);
+
+      const strict = runStatus(
+        [],
+        { INSTALL_POLICY: 'strict', REPORT_DELIVERY: 'discord-dm', OPS_DELIVERY_SUCCESS_STALE_SEC: '300' },
+        dir
+      );
+      const strictOut = parseLine(strict.stdout);
+      expect(strictOut.delivery_health).toBe('unhealthy');
+      expect(strictOut.overall).toBe('unhealthy');
+
+      const balanced = runStatus(
+        [],
+        { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'discord-dm', OPS_DELIVERY_SUCCESS_STALE_SEC: '300' },
+        dir
+      );
+      const balancedOut = parseLine(balanced.stdout);
+      expect(balancedOut.delivery_health).toBe('unhealthy');
+      expect(balancedOut.overall).toBe('degraded');
+
+      const fast = runStatus(
+        [],
+        { INSTALL_POLICY: 'fast', REPORT_DELIVERY: 'discord-dm', OPS_DELIVERY_SUCCESS_STALE_SEC: '300' },
+        dir
+      );
+      const fastOut = parseLine(fast.stdout);
+      expect(fastOut.delivery_health).toBe('unhealthy');
+      expect(fastOut.overall).toBe('degraded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('REPORT_DELIVERY=none => delivery disabled and no overall impact', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-disabled-'));
+    try {
+      writeDeliveryLog(dir, ['broken line']);
+
+      const result = runStatus([], { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'none' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.delivery_health).toBe('disabled');
+      expect(out.delivery_successes).toBe('0');
+      expect(out.delivery_failures).toBe('0');
+      expect(out.delivery_last_success_age_sec).toBe('-1');
+      expect(out.overall).toBe('healthy');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('delivery log parse fault is conservative (minimum degraded)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-parse-fault-'));
+    try {
+      writeDeliveryLog(dir, ['not-a-valid-log-line']);
+      writeDeliveryLogRotated(dir, '1', [`${isoSecondsAgo(30)} event=delivery_success mode=discord-dm chunk=1/1 attempt=1/3`]);
+
+      const result = runStatus([], { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'discord-dm' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.delivery_health).toBe('degraded');
+      expect(out.overall).toBe('degraded');
+      expect(out.delivery_successes).toBe('1');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('delivery log missing is conservative by policy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-missing-'));
+    try {
+      const strict = runStatus([], { INSTALL_POLICY: 'strict', REPORT_DELIVERY: 'telegram' }, dir);
+      const strictOut = parseLine(strict.stdout);
+      expect(strictOut.delivery_health).toBe('unhealthy');
+      expect(strictOut.overall).toBe('unhealthy');
+
+      const balanced = runStatus([], { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'telegram' }, dir);
+      const balancedOut = parseLine(balanced.stdout);
+      expect(balancedOut.delivery_health).toBe('unhealthy');
+      expect(balancedOut.overall).toBe('degraded');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

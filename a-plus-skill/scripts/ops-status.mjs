@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,8 @@ const cwd = process.cwd();
 const strictStatePath = process.env.OPS_STRICT_STATE_PATH?.trim() || resolve(cwd, 'data', 'strict-evidence-fail-state.json');
 const fastCapStatePath = process.env.OPS_FAST_CAP_STATE_PATH?.trim() || resolve(cwd, 'data', 'fast-audit-fail-cap.json');
 const fastCapKeyPath = process.env.OPS_FAST_CAP_KEY_PATH?.trim() || resolve(dirname(fastCapStatePath), 'fast-audit-fail-cap.key');
+const deliveryLogPath = process.env.OPS_REPORT_DELIVERY_LOG_PATH?.trim() || resolve(cwd, 'data', 'report-delivery.log');
+const DEFAULT_DELIVERY_SUCCESS_STALE_SEC = 8 * 24 * 60 * 60;
 
 function parseArgs(argv = process.argv.slice(2)) {
   let strictMode = null;
@@ -113,6 +115,127 @@ function readFastCapStatus(statePath, keyPath) {
   return { count: Math.floor(count), tampered: false, reason: 'none' };
 }
 
+function getDeliveryLogPaths(basePath) {
+  const dir = dirname(basePath);
+  const baseName = basePath.split(/[\\/]/).pop() ?? 'report-delivery.log';
+
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [basePath];
+  }
+
+  return names
+    .filter((name) => name === baseName || name.startsWith(`${baseName}.`))
+    .map((name) => resolve(dir, name))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function parseDeliveryLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  const firstSpace = trimmed.indexOf(' ');
+  if (firstSpace <= 0) return { parseError: true };
+
+  const tsRaw = trimmed.slice(0, firstSpace);
+  const tsMs = Date.parse(tsRaw);
+  if (!Number.isFinite(tsMs)) return { parseError: true };
+
+  const fields = trimmed.slice(firstSpace + 1).trim().split(/\s+/g);
+  let event = '';
+  for (const field of fields) {
+    const [k, ...rest] = field.split('=');
+    if (k === 'event') {
+      event = rest.join('=');
+      break;
+    }
+  }
+
+  if (!event) return { parseError: true };
+  return { tsMs, event };
+}
+
+function getDeliveryStaleThresholdSec() {
+  const raw = process.env.OPS_DELIVERY_SUCCESS_STALE_SEC?.trim();
+  if (!raw) return DEFAULT_DELIVERY_SUCCESS_STALE_SEC;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_DELIVERY_SUCCESS_STALE_SEC;
+  return parsed;
+}
+
+function readDeliveryHealth(modeRaw) {
+  if (modeRaw === 'none') {
+    return {
+      health: 'disabled',
+      lastSuccessAgeSec: -1,
+      failures: 0,
+      successes: 0,
+      parseFault: false,
+      noSignal: false,
+      stale: false
+    };
+  }
+
+  let successes = 0;
+  let failures = 0;
+  let lastSuccessTsMs = 0;
+  let parseFault = false;
+  let foundAnyLog = false;
+
+  const logPaths = getDeliveryLogPaths(deliveryLogPath);
+  for (const path of logPaths) {
+    let raw = '';
+    try {
+      raw = readFileSync(path, 'utf8');
+      foundAnyLog = true;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+      if (code === 'ENOENT') {
+        continue;
+      }
+      parseFault = true;
+      continue;
+    }
+
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      const parsed = parseDeliveryLine(line);
+      if (!parsed) continue;
+      if (parsed.parseError) {
+        parseFault = true;
+        continue;
+      }
+
+      if (parsed.event === 'delivery_success') {
+        successes += 1;
+        if (parsed.tsMs > lastSuccessTsMs) {
+          lastSuccessTsMs = parsed.tsMs;
+        }
+      } else if (parsed.event === 'delivery_failed') {
+        failures += 1;
+      }
+    }
+  }
+
+  const nowMs = Date.now();
+  const lastSuccessAgeSec = lastSuccessTsMs > 0 ? Math.max(0, Math.floor((nowMs - lastSuccessTsMs) / 1000)) : -1;
+  const staleThreshold = getDeliveryStaleThresholdSec();
+  const stale = lastSuccessAgeSec >= 0 && lastSuccessAgeSec > staleThreshold;
+  const noSignal = successes === 0 || !foundAnyLog;
+
+  let health = 'healthy';
+  if (parseFault) {
+    health = 'degraded';
+  }
+  if (noSignal || stale) {
+    health = 'unhealthy';
+  }
+
+  return { health, lastSuccessAgeSec, failures, successes, parseFault, noSignal, stale };
+}
+
 function q(value) {
   return JSON.stringify(String(value));
 }
@@ -136,22 +259,31 @@ function main() {
   const fastCap = readFastCapStatus(fastCapStatePath, fastCapKeyPath);
   const fastCapExceeded = fastCap.count > cap;
 
+  const deliveryMode = (process.env.REPORT_DELIVERY ?? 'none').trim().toLowerCase();
+  const delivery = readDeliveryHealth(deliveryMode);
+
   let overall = 'healthy';
 
   if (policy === 'strict') {
-    if (!audit.ok || strictState.fault || fastCap.tampered) {
+    if (!audit.ok || strictState.fault || fastCap.tampered || (deliveryMode !== 'none' && (delivery.noSignal || delivery.stale))) {
       overall = 'unhealthy';
-    } else if (strictState.failures > 0) {
+    } else if (strictState.failures > 0 || delivery.parseFault) {
       overall = 'degraded';
     }
   } else if (policy === 'balanced') {
     if (!audit.ok || strictState.fault || strictState.failures > 0 || fastCap.tampered) {
       overall = 'degraded';
     }
+    if (deliveryMode !== 'none' && (delivery.noSignal || delivery.stale || delivery.parseFault)) {
+      overall = 'degraded';
+    }
   } else {
     if (fastCap.tampered || fastCapExceeded) {
       overall = 'unhealthy';
     } else if (strictState.fault || strictState.failures > 0) {
+      overall = 'degraded';
+    }
+    if (deliveryMode !== 'none' && (delivery.noSignal || delivery.stale || delivery.parseFault)) {
       overall = 'degraded';
     }
   }
@@ -177,6 +309,10 @@ function main() {
     `fast_cap_count=${fastCap.count}`,
     `fast_cap_cap=${cap}`,
     `fast_cap_tampered=${fastCap.tampered}`,
+    `delivery_health=${delivery.health}`,
+    `delivery_last_success_age_sec=${delivery.lastSuccessAgeSec}`,
+    `delivery_failures=${delivery.failures}`,
+    `delivery_successes=${delivery.successes}`,
     `critical_flags_present=${criticalFlags.length > 0}`,
     `critical_flags=${q(criticalFlags.join(','))}`,
     `overall=${overall}`
