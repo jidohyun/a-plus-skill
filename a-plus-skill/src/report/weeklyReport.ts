@@ -1,5 +1,11 @@
 import type { CollectorMeta, RecommendationResult } from '../types/index.js';
 
+function summarizeReasons(reasons: string[]): string {
+  const cleaned = reasons.map((reason) => reason.trim()).filter(Boolean);
+  if (cleaned.length === 0) return 'reason unavailable';
+  return cleaned.slice(0, 2).join('; ');
+}
+
 export function renderWeeklyReport(items: RecommendationResult[], meta: CollectorMeta): string {
   const mode = meta.degraded ? 'fallback' : 'live';
   const fallbackReason = mode === 'fallback' ? meta.fallbackReason ?? 'UNKNOWN' : 'NONE';
@@ -9,7 +15,8 @@ export function renderWeeklyReport(items: RecommendationResult[], meta: Collecto
     .map((it, i) => {
       const outcome = it.installOutcome ? ` | outcome ${it.installOutcome.status}` : '';
       const action = it.installAction ? ` | action ${it.installAction}` : '';
-      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}`;
+      const reasons = ` | why ${summarizeReasons(it.reasons)}`;
+      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}${reasons}`;
     })
     .join('\n');
 
