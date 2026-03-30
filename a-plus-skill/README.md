@@ -64,12 +64,12 @@ source=live degraded=false fallbackReason=NONE fetchedAt=2026-03-30T00:00:00.000
 decisions recommend=2 caution=1 hold=1 block=1
 takeaway mixed recommendation profile; review item-level explanations before acting
 
-1. demo/weather | score 82.5 | security 90 | recommend | action auto-install | recommended because the overall profile is strong | topSignals security=90.0, trend=82.0 | why trusted author; strong security score
-2. demo/agent | score 61.0 | security 58 | caution | cautioned because some signals are mixed | topSignals trend=66.0, stability=61.0 | why active installs growing; score near caution threshold
+1. demo/weather | score 82.5 | security 90 | recommend | action auto-install | recommended because both score and security cleared the top thresholds | topSignals security=90.0, trend=82.0 | why trusted author; strong security score
+2. demo/agent | score 61.0 | security 58 | caution | cautioned because the item cleared caution thresholds but not the recommendation bar | topSignals trend=66.0, stability=61.0 | why active installs growing; score near caution threshold
 ```
 - 헤더의 `decisions ...` 줄은 전체 추천 분포를 보여줍니다.
 - `takeaway ...` 줄은 이번 배치의 전체 총평입니다.
-- 각 항목에는 decision 자연어 설명문이 포함됩니다.
+- 각 항목의 decision 설명은 score/security threshold 관점으로 서술됩니다.
 - `topSignals ...`는 fit/trend/stability/security 중 상위 2개 축을 보여줍니다.
 - `why ...`는 `reasons[]` 중 상위 2개를 요약한 것입니다.
 - `fallbackReason`이 `NONE`이 아니면 collector가 fallback 경로였다는 뜻입니다.
