@@ -76,9 +76,17 @@ describe('policy', () => {
     const denied = planInstallAction('strict', 'hold', { confirmed: true, overrideToken: 'short' });
     expect(denied.canInstall).toBe(false);
 
+    const pending = planInstallAction('strict', 'hold', {
+      confirmed: false,
+      overrideToken: makeCurrentOverrideToken(),
+      overrideReason: 'urgent-fix'
+    });
+    expect(pending.canInstall).toBe(false);
+    expect(pending.notes).toContain('hold override pending: confirmation missing');
+
     const allowed = planInstallAction('strict', 'hold', {
       confirmed: true,
-      overrideToken: makeCurrentOverrideToken(),
+      overrideToken: makeCurrentOverrideToken({ nonce: 'ZyXwVuTsRqPoNmLkJiHgFeDc' }),
       overrideReason: 'urgent-fix'
     });
     expect(allowed.canInstall).toBe(true);
@@ -103,10 +111,19 @@ describe('policy', () => {
     });
     expect(denied.canInstall).toBe(false);
 
-    const allowed = planInstallAction('balanced', 'block', {
-      confirmed: true,
+    const pending = planInstallAction('balanced', 'block', {
+      confirmed: false,
       overrideToken: makeCurrentOverrideToken(),
       strongOverrideToken: makeCurrentOverrideToken({ nonce: 'ZyXwVuTsRqPoNmLkJiHgFeDc' }),
+      overrideReason: 'business critical'
+    });
+    expect(pending.canInstall).toBe(false);
+    expect(pending.notes).toContain('balanced policy: block override pending: confirmation missing');
+
+    const allowed = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken({ nonce: 'MnOpQrStUvWxYzAbCdEfGhIj' }),
+      strongOverrideToken: makeCurrentOverrideToken({ nonce: 'QwErTyUiOpAsDfGhJkLzXcVb' }),
       overrideReason: 'business critical'
     });
     expect(allowed.canInstall).toBe(true);
@@ -120,9 +137,17 @@ describe('policy', () => {
     });
     expect(denied.canInstall).toBe(false);
 
+    const pending = planInstallAction('fast', 'block', {
+      confirmed: false,
+      overrideToken: makeCurrentOverrideToken(),
+      overrideReason: 'operator approved'
+    });
+    expect(pending.canInstall).toBe(false);
+    expect(pending.notes).toContain('fast policy: block override pending: confirmation missing');
+
     const allowed = planInstallAction('fast', 'block', {
       confirmed: true,
-      overrideToken: makeCurrentOverrideToken(),
+      overrideToken: makeCurrentOverrideToken({ nonce: 'ZyXwVuTsRqPoNmLkJiHgFeDc' }),
       overrideReason: 'operator approved'
     });
     expect(allowed.canInstall).toBe(true);

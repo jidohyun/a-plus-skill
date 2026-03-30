@@ -191,7 +191,8 @@ export function planInstallAction(
 
   if (effectiveDecision === 'hold') {
     const override = validateOverrideToken(context.overrideToken);
-    const canOverride = override.valid && hasReason(context.overrideReason);
+    const hasValidReason = hasReason(context.overrideReason);
+    const canOverride = override.valid && hasValidReason;
     if (canOverride && context.confirmed) {
       const consumed = override.parsed ? markOverrideTokenUsed(override.parsed) : true;
       if (!consumed) {
@@ -215,6 +216,10 @@ export function planInstallAction(
         canInstall: true,
         notes
       };
+    }
+
+    if (override.valid && hasValidReason && !context.confirmed) {
+      notes.push('hold override pending: confirmation missing');
     }
 
     notes.push(
@@ -263,13 +268,14 @@ export function planInstallAction(
 
     const override = validateOverrideToken(context.overrideToken);
     const strongOverride = validateOverrideToken(context.strongOverrideToken);
+    const hasValidReason = hasReason(context.overrideReason);
     const hasStrongOverride = override.valid && strongOverride.valid;
 
     const nonceConflict = Boolean(
       override.parsed && strongOverride.parsed && override.parsed.nonce === strongOverride.parsed.nonce
     );
 
-    if (!nonceConflict && hasStrongOverride && hasReason(context.overrideReason) && context.confirmed) {
+    if (!nonceConflict && hasStrongOverride && hasValidReason && context.confirmed) {
       const overrideConsumed = override.parsed ? markOverrideTokenUsed(override.parsed) : true;
       const strongConsumed = strongOverride.parsed ? markOverrideTokenUsed(strongOverride.parsed) : true;
 
@@ -296,6 +302,10 @@ export function planInstallAction(
       };
     }
 
+    if (!nonceConflict && hasStrongOverride && hasValidReason && !context.confirmed) {
+      notes.push('balanced policy: block override pending: confirmation missing');
+    }
+
     notes.push('balanced policy: block needs strong override token + strong override token + reason + confirmation');
     return {
       policy,
@@ -309,7 +319,8 @@ export function planInstallAction(
 
   // fast policy
   const override = validateOverrideToken(context.overrideToken);
-  if (override.valid && hasReason(context.overrideReason) && context.confirmed) {
+  const hasValidReason = hasReason(context.overrideReason);
+  if (override.valid && hasValidReason && context.confirmed) {
     const consumed = override.parsed ? markOverrideTokenUsed(override.parsed) : true;
     if (!consumed) {
       notes.push('fast policy: block override rejected due to nonce replay');
@@ -332,6 +343,10 @@ export function planInstallAction(
       canInstall: true,
       notes
     };
+  }
+
+  if (override.valid && hasValidReason && !context.confirmed) {
+    notes.push('fast policy: block override pending: confirmation missing');
   }
 
   notes.push('fast policy: block needs strong override token + reason + confirmation');
