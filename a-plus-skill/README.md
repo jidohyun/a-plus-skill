@@ -265,6 +265,9 @@ npm run ops:status -- --strict=unhealthy
 
 운영 팁:
 - delivery stale 임계치 기본값은 `8일`이며, `OPS_DELIVERY_SUCCESS_STALE_SEC`로 조정할 수 있습니다.
+- `fast_cap_tampered=true`는 운영자가 fast-cap state/key 쌍을 신뢰할 수 없다는 뜻입니다. partial delete(한쪽만 삭제)는 의도적으로 tamper로 간주합니다.
+- fast-cap 복구 시에는 `data/fast-audit-fail-cap.json` 또는 `.key` 한쪽만 지우지 말고, 원인 확인 후 **둘 다 함께 초기화**하거나 그대로 보존해 조사하세요.
+- 상세 운영 절차는 `docs/fast-cap-runbook.md`를 참고하세요.
 
 `--strict` 종료 규약:
 - 유효 strict mode: `unhealthy | nonhealthy`
