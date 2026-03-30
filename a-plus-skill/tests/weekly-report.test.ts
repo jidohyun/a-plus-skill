@@ -87,7 +87,7 @@ describe('weekly report render', () => {
     expect(out).toContain('decisions recommend=1 caution=1 hold=1 block=1');
   });
 
-  it('adds context-aware decision explanations', () => {
+  it('adds threshold-aware decision explanations', () => {
     const meta: CollectorMeta = {
       source: 'live',
       degraded: false,
@@ -96,18 +96,18 @@ describe('weekly report render', () => {
 
     const out = renderWeeklyReport(
       [
-        makeItem({ slug: 'one/skill', decision: 'recommend', securityScore: 95, trendScore: 88, fitScore: 40, stabilityScore: 35 }),
-        makeItem({ slug: 'two/skill', decision: 'caution', fitScore: 75, trendScore: 61, stabilityScore: 20, securityScore: 18 }),
-        makeItem({ slug: 'three/skill', decision: 'hold', trendScore: 52, fitScore: 49, stabilityScore: 20, securityScore: 18 }),
-        makeItem({ slug: 'four/skill', decision: 'block', securityScore: 20, trendScore: 85, fitScore: 80, stabilityScore: 77 })
+        makeItem({ slug: 'one/skill', decision: 'recommend', finalScore: 82, securityScore: 95, trendScore: 88, fitScore: 40, stabilityScore: 35 }),
+        makeItem({ slug: 'two/skill', decision: 'caution', finalScore: 63, fitScore: 75, trendScore: 61, stabilityScore: 20, securityScore: 58 }),
+        makeItem({ slug: 'three/skill', decision: 'hold', finalScore: 52, trendScore: 52, fitScore: 49, stabilityScore: 20, securityScore: 48 }),
+        makeItem({ slug: 'four/skill', decision: 'block', finalScore: 81, securityScore: 20, trendScore: 85, fitScore: 80, stabilityScore: 77 })
       ],
       meta
     );
 
-    expect(out).toContain('recommended because security and trend signals are both strong');
-    expect(out).toContain('cautioned because fit is promising but trend still needs review');
-    expect(out).toContain('held because trend is not strong enough to offset weaker signals');
-    expect(out).toContain('blocked primarily due to security risk');
+    expect(out).toContain('recommended because both score and security cleared the top thresholds');
+    expect(out).toContain('cautioned because the item cleared caution thresholds but not the recommendation bar');
+    expect(out).toContain('held because score and security both missed the caution thresholds');
+    expect(out).toContain('blocked because the security gate stayed below the minimum threshold');
   });
 
   it('includes top scoring signals for each item', () => {

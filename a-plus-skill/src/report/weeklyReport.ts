@@ -22,28 +22,39 @@ function summarizeDecisionCounts(items: RecommendationResult[]): string {
 }
 
 function explainDecision(item: RecommendationResult): string {
-  const ranked: Array<[string, number]> = [
-    ['fit', item.fitScore] as [string, number],
-    ['trend', item.trendScore] as [string, number],
-    ['stability', item.stabilityScore] as [string, number],
-    ['security', item.securityScore] as [string, number]
-  ].sort((a, b) => b[1] - a[1]);
-
-  const top = ranked[0]?.[0] ?? 'overall';
-  const second = ranked[1]?.[0] ?? 'overall';
-
-  switch (item.decision) {
-    case 'recommend':
-      return `recommended because ${top} and ${second} signals are both strong`;
-    case 'caution':
-      return `cautioned because ${top} is promising but ${second} still needs review`;
-    case 'hold':
-      return `held because ${top} is not strong enough to offset weaker signals`;
-    case 'block':
-      return item.securityScore < 40
-        ? 'blocked primarily due to security risk'
-        : `blocked because ${top} and ${second} did not clear the required thresholds`;
+  if (item.decision === 'block') {
+    if (item.securityScore < 40) {
+      return 'blocked because the security gate stayed below the minimum threshold';
+    }
+    return 'blocked because threshold requirements were not met';
   }
+
+  if (item.decision === 'recommend') {
+    if (item.finalScore >= 75 && item.securityScore >= 70) {
+      return 'recommended because both score and security cleared the top thresholds';
+    }
+    return 'recommended because the overall profile cleared the strongest recommendation bar';
+  }
+
+  if (item.decision === 'caution') {
+    if (item.finalScore >= 60 && item.securityScore >= 55) {
+      return 'cautioned because the item cleared caution thresholds but not the recommendation bar';
+    }
+    return 'cautioned because the item looks viable but did not clear the top threshold';
+  }
+
+  const scoreGap = Math.max(0, 60 - item.finalScore).toFixed(1);
+  const securityGap = Math.max(0, 55 - item.securityScore).toFixed(1);
+  if (Number.parseFloat(scoreGap) > 0 && Number.parseFloat(securityGap) > 0) {
+    return `held because score and security both missed the caution thresholds (gap score=${scoreGap}, security=${securityGap})`;
+  }
+  if (Number.parseFloat(scoreGap) > 0) {
+    return `held because score missed the caution threshold by ${scoreGap}`;
+  }
+  if (Number.parseFloat(securityGap) > 0) {
+    return `held because security missed the caution threshold by ${securityGap}`;
+  }
+  return 'held because the item did not clear the caution threshold after buffering';
 }
 
 function summarizeTopSignals(item: RecommendationResult): string {
