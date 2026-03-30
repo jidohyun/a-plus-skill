@@ -36,7 +36,7 @@ export function calculateTrendScore(skill: SkillMeta): number {
   const starsSignal = clampScore((Math.log10(stars + 1) / 4) * 100);
   const installSignal = clampScore((Math.log10(installsCurrent + 1) / 5) * 100);
 
-  return clampScore(downloadsSignal * 0.55 + starsSignal * 0.3 + installSignal * 0.15);
+  return clampScore(downloadsSignal * 0.4 + starsSignal * 0.25 + installSignal * 0.35);
 }
 
 export function calculateStabilityScore(skill: SkillMeta, nowMs: number = Date.now()): number {

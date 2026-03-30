@@ -56,6 +56,13 @@ describe('scoring', () => {
     expect(calculateTrendScore(grown)).toBeGreaterThanOrEqual(calculateTrendScore(base));
   });
 
+  it('gives active installs more influence than pure download bulk when popularity is stale', () => {
+    const bulky = makeSkill({ downloads: 100000, installsCurrent: 50, stars: 40 });
+    const active = makeSkill({ downloads: 3000, installsCurrent: 1200, stars: 120 });
+
+    expect(calculateTrendScore(active)).toBeGreaterThan(calculateTrendScore(bulky));
+  });
+
   it('changes stability score reasonably with versions and updatedAt', () => {
     const oldAndSparse = makeSkill({
       versions: 2,
