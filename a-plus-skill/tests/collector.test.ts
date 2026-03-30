@@ -68,6 +68,18 @@ describe('collector', () => {
     expect(skills[0]?.installsCurrent).toBe(22);
   });
 
+  it('parses skill list from data-* attribute JSON payload', () => {
+    const payload = `[{&quot;slug&quot;:&quot;demo/attr-skill&quot;,&quot;name&quot;:&quot;Attr Skill&quot;,&quot;author&quot;:&quot;demo&quot;,&quot;downloadCount&quot;:&quot;77&quot;,&quot;activeInstalls&quot;:&quot;9&quot;,&quot;starCount&quot;:&quot;5&quot;,&quot;versionCount&quot;:2,&quot;description&quot;:&quot;From data attribute&quot;}]`;
+    const html = `<html><body><div id="skills-root" data-skills="${payload}"></div></body></html>`;
+
+    const skills = parseSkillsFromHtml(html);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.slug).toBe('demo/attr-skill');
+    expect(skills[0]?.downloads).toBe(77);
+    expect(skills[0]?.installsCurrent).toBe(9);
+    expect(skills[0]?.stars).toBe(5);
+  });
+
   it('falls back with metadata on fetch failure', async () => {
     const failingFetch: typeof fetch = async () => {
       throw new Error('network down');

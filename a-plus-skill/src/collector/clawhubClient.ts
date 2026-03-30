@@ -121,6 +121,27 @@ function extractJsonCandidatesFromHtml(html: string): unknown[] {
     }
   }
 
+  const dataAttributes = html.matchAll(/data-(?:skills|page|state|props)=(["'])([\s\S]*?)\1/gi);
+  for (const match of dataAttributes) {
+    const raw = match[2]?.trim();
+    if (!raw) continue;
+
+    const decoded = raw
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+
+    if (!decoded.startsWith('{') && !decoded.startsWith('[')) continue;
+
+    try {
+      candidates.push(JSON.parse(decoded));
+    } catch {
+      // ignore malformed embedded attribute JSON
+    }
+  }
+
   return candidates;
 }
 
