@@ -155,6 +155,7 @@ npm run scoring:calibration -- --json
 ```
 - 현재 collector 결과를 기준으로 fit/trend/stability/security/final 분포를 보여줍니다.
 - `decision_counts`를 함께 출력해 recommend/caution/hold/block 쏠림을 빠르게 확인할 수 있습니다.
+- fallback/저샘플 상황에서는 `sample_quality=limited`와 보수적 해석 note가 함께 출력됩니다.
 - 최근 보정에서는 `trend`가 과거 download bulk보다 `installsCurrent`(현재 활성도)를 더 반영하도록 가중치를 조정했습니다.
 - profile fallback 시에도 완전히 평평한 fit 점수가 나오지 않도록 safe default profile을 강화했습니다.
 

@@ -19,6 +19,7 @@ describe('scoring calibration script', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('scoring_calibration');
+    expect(result.stdout).toContain('sample_quality=');
     expect(result.stdout).toContain('fit min=');
     expect(result.stdout).toContain('trend min=');
     expect(result.stdout).toContain('stability min=');
@@ -41,6 +42,8 @@ describe('scoring calibration script', () => {
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.summary).toBeTruthy();
+    expect(parsed.summary.sample_quality).toBeTruthy();
+    expect(parsed.summary.note).toBeTruthy();
     expect(parsed.distributions.fit).toBeTruthy();
     expect(parsed.distributions.trend).toBeTruthy();
     expect(parsed.decision_counts).toBeTruthy();

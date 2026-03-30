@@ -60,6 +60,8 @@ for (const skill of skills) {
   increment(decisionCounts, decision);
 }
 
+const sampleQuality = meta.degraded || skills.length < 5 ? 'limited' : 'normal';
+
 if (jsonMode) {
   console.log(
     JSON.stringify({
@@ -67,7 +69,12 @@ if (jsonMode) {
         policy,
         source: meta.source,
         degraded: meta.degraded,
-        skill_count: skills.length
+        skill_count: skills.length,
+        sample_quality: sampleQuality,
+        note:
+          sampleQuality === 'limited'
+            ? 'collector fallback or low sample count; use calibration output conservatively'
+            : 'live sample looks sufficient for directional calibration'
       },
       distributions: {
         fit: summarizeStats(fitScores),
@@ -85,7 +92,10 @@ if (jsonMode) {
     })
   );
 } else {
-  console.log(`scoring_calibration policy=${policy} source=${meta.source} degraded=${meta.degraded} skill_count=${skills.length}`);
+  console.log(`scoring_calibration policy=${policy} source=${meta.source} degraded=${meta.degraded} skill_count=${skills.length} sample_quality=${sampleQuality}`);
+  if (sampleQuality === 'limited') {
+    console.log('note collector fallback or low sample count; use calibration output conservatively');
+  }
   printStats('fit', fitScores);
   printStats('trend', trendScores);
   printStats('stability', stabilityScores);
