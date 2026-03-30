@@ -30,6 +30,10 @@
   - each item now includes `topSignals` (top 2 scoring axes)
   - each item now includes concise `why` reason summary
   - README examples updated to match the richer report format
+- Recommendation quality tooling improved:
+  - added `npm run scoring:calibration` to inspect score distributions and decision counts
+  - trend weighting now gives more influence to current active installs vs pure historical download bulk
+  - reason generation now uses more specific threshold/gate-oriented wording
 - Report delivery visibility improved:
   - delivery log entries now include `collector_source`, `collector_degraded`, `collector_reason`
   - `delivery:failures` now summarizes by collector source/reason
