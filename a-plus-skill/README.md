@@ -244,7 +244,7 @@ npm run ops:status -- --strict=unhealthy
 - `policy`
 - `audit_ok`, `audit_reason`, `audit_line`
 - `strict_failures`, `strict_state_fault`
-- `fast_cap_count`, `fast_cap_cap`, `fast_cap_tampered`
+- `fast_cap_count`, `fast_cap_cap`, `fast_cap_tampered`, `fast_cap_reason`
 - `delivery_health` (`healthy|degraded|unhealthy|disabled`)
 - `delivery_last_success_age_sec` (최근 success 이벤트 경과 초, 없으면 `-1`)
 - `delivery_failures`, `delivery_successes`

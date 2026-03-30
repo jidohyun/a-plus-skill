@@ -88,6 +88,7 @@ describe('ops-status script', () => {
       expect(out.strict_failures).toBe('0');
       expect(out.strict_state_fault).toBe('false');
       expect(out.fast_cap_tampered).toBe('false');
+      expect(out.fast_cap_reason).toBe('none');
       expect(out.critical_flags_present).toBe('false');
       expect(out.critical_flags).toBe('');
       expect(out.overall).toBe('healthy');
@@ -138,6 +139,7 @@ describe('ops-status script', () => {
       expect(result.status).toBe(0);
       const out = parseLine(result.stdout);
       expect(out.fast_cap_tampered).toBe('true');
+      expect(out.fast_cap_reason).toBe('checksum_mismatch');
       expect(out.critical_flags_present).toBe('true');
       expect(out.critical_flags).toBe('fast_cap_tampered');
       expect(out.overall).toBe('unhealthy');
@@ -187,6 +189,25 @@ describe('ops-status script', () => {
       expect(result.status).toBe(0);
       const out = parseLine(result.stdout);
       expect(out.fast_cap_tampered).toBe('true');
+      expect(out.fast_cap_reason).toBe('checksum_mismatch');
+      expect(out.overall).toBe('degraded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports suspicious reset when fast-cap key exists without state', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-fast-key-only-'));
+    try {
+      const dataDir = join(dir, 'data');
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, 'fast-audit-fail-cap.key'), `${'k'.repeat(64)}\n`, 'utf8');
+
+      const result = runStatus([], { INSTALL_POLICY: 'balanced' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.fast_cap_tampered).toBe('true');
+      expect(out.fast_cap_reason).toBe('suspicious fast-cap reset: key exists while state missing');
       expect(out.overall).toBe('degraded');
     } finally {
       rmSync(dir, { recursive: true, force: true });

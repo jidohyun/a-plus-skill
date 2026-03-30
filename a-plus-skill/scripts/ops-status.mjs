@@ -309,6 +309,7 @@ function main() {
     `fast_cap_count=${fastCap.count}`,
     `fast_cap_cap=${cap}`,
     `fast_cap_tampered=${fastCap.tampered}`,
+    `fast_cap_reason=${q(fastCap.reason ?? 'none')}`,
     `delivery_health=${delivery.health}`,
     `delivery_last_success_age_sec=${delivery.lastSuccessAgeSec}`,
     `delivery_failures=${delivery.failures}`,
