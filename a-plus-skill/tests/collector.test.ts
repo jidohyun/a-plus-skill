@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_CLAWHUB_FETCH_TIMEOUT_MS,
   DEFAULT_MIN_PARSED_SKILLS,
   MAX_CLAWHUB_HTML_BYTES,
   MAX_MIN_PARSED_SKILLS,
   fetchCandidateSkills,
   MOCK_SKILLS,
-  parseSkillsFromHtml
+  parseSkillsFromHtml,
+  resolveClawhubFetchTimeoutMs
 } from '../src/collector/clawhubClient.js';
 
 const DEFAULT_CLAWHUB_SKILLS_URL = 'https://clawhub.ai/skills?nonSuspicious=true';
@@ -21,9 +23,18 @@ function withEnv(name: string, value: string | undefined): void {
 afterEach(() => {
   delete process.env.CLAWHUB_BASE_URL;
   delete process.env.MIN_PARSED_SKILLS;
+  delete process.env.CLAWHUB_FETCH_TIMEOUT_MS;
 });
 
 describe('collector', () => {
+  it('resolves collector fetch timeout with bounds', () => {
+    expect(resolveClawhubFetchTimeoutMs(undefined)).toBe(DEFAULT_CLAWHUB_FETCH_TIMEOUT_MS);
+    expect(resolveClawhubFetchTimeoutMs('abc')).toBe(DEFAULT_CLAWHUB_FETCH_TIMEOUT_MS);
+    expect(resolveClawhubFetchTimeoutMs('500')).toBe(1000);
+    expect(resolveClawhubFetchTimeoutMs('999999')).toBe(60000);
+    expect(resolveClawhubFetchTimeoutMs('2500')).toBe(2500);
+  });
+
   it('parses skill list from embedded JSON script (including numeric strings)', () => {
     const html = `
       <html><body>
@@ -68,6 +79,32 @@ describe('collector', () => {
     expect(result.meta.degraded).toBe(true);
     expect(result.meta.source).toBe('fallback');
     expect(result.meta.fallbackReason).toContain('FETCH_ERROR');
+  });
+
+  it('falls back with timeout metadata when fetch aborts', async () => {
+    const abortingFetch: typeof fetch = async (_input, init) => {
+      const signal = init?.signal;
+      await new Promise((_, reject) => {
+        if (signal) {
+          if (signal.aborted) {
+            reject(signal.reason ?? new Error('aborted'));
+            return;
+          }
+          signal.addEventListener(
+            'abort',
+            () => reject(signal.reason ?? new Error('aborted')),
+            { once: true }
+          );
+        }
+      });
+      throw new Error('unreachable');
+    };
+
+    withEnv('CLAWHUB_FETCH_TIMEOUT_MS', '1000');
+    const result = await fetchCandidateSkills(abortingFetch);
+    expect(result.meta.source).toBe('fallback');
+    expect(result.meta.degraded).toBe(true);
+    expect(result.meta.fallbackReason).toBe('FETCH_ERROR_TIMEOUT');
   });
 
   it('uses default URL when CLAWHUB_BASE_URL host is disallowed', async () => {

@@ -5,8 +5,11 @@ const ALLOWED_HOSTS = new Set(['clawhub.ai', 'www.clawhub.ai', 'clawhub.org', 'w
 export const DEFAULT_MIN_PARSED_SKILLS = 3;
 export const MAX_MIN_PARSED_SKILLS = 50;
 export const MAX_CLAWHUB_HTML_BYTES = 2 * 1024 * 1024;
+export const DEFAULT_CLAWHUB_FETCH_TIMEOUT_MS = 10_000;
 
 type FetchLike = typeof fetch;
+
+type FetchOptions = Parameters<FetchLike>[1];
 
 const MOCK_SKILLS: SkillMeta[] = [
   {
@@ -36,6 +39,12 @@ const MOCK_SKILLS: SkillMeta[] = [
     updatedAt: new Date().toISOString()
   }
 ];
+
+export function resolveClawhubFetchTimeoutMs(raw = process.env.CLAWHUB_FETCH_TIMEOUT_MS): number {
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CLAWHUB_FETCH_TIMEOUT_MS;
+  return Math.max(1_000, Math.min(60_000, Math.floor(parsed)));
+}
 
 function resolveSkillsUrl(): string {
   const raw = process.env.CLAWHUB_BASE_URL?.trim() || DEFAULT_CLAWHUB_SKILLS_URL;
@@ -228,14 +237,25 @@ function fallbackResult(reason: string): CollectorResult {
 export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<CollectorResult> {
   const skillsUrl = resolveSkillsUrl();
   const minParsedSkills = resolveMinParsedSkills();
+  const timeoutMs = resolveClawhubFetchTimeoutMs();
 
   try {
-    const response = await fetcher(skillsUrl, {
-      headers: {
-        'user-agent': 'a-plus-skill/0.1',
-        accept: 'text/html,application/xhtml+xml'
-      }
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error(`collector timeout after ${timeoutMs}ms`)), timeoutMs);
+
+    let response;
+    try {
+      const options: FetchOptions = {
+        headers: {
+          'user-agent': 'a-plus-skill/0.1',
+          accept: 'text/html,application/xhtml+xml'
+        },
+        signal: controller.signal
+      };
+      response = await fetcher(skillsUrl, options);
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const reason = `HTTP_${response.status}`;
@@ -287,7 +307,10 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
       }
     };
   } catch (error) {
-    const reasonCode = error instanceof Error ? error.name || 'ERROR' : 'UNKNOWN';
+    const isAbort =
+      (error instanceof Error && error.name === 'AbortError') ||
+      (error instanceof Error && error.message.includes('collector timeout after'));
+    const reasonCode = isAbort ? 'TIMEOUT' : error instanceof Error ? error.name || 'ERROR' : 'UNKNOWN';
     console.warn(`[collector] ClawHub fetch failed (${reasonCode}); falling back to mock data.`);
     return fallbackResult(`FETCH_ERROR_${reasonCode}`);
   }
