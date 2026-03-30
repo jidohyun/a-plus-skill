@@ -221,6 +221,9 @@ export function planInstallAction(
     if (override.valid && hasValidReason && !context.confirmed) {
       notes.push('hold override pending: confirmation missing');
     }
+    if (override.valid && !hasValidReason) {
+      notes.push('hold override pending: reason missing or too short');
+    }
 
     notes.push(
       policy === 'strict'
@@ -305,6 +308,9 @@ export function planInstallAction(
     if (!nonceConflict && hasStrongOverride && hasValidReason && !context.confirmed) {
       notes.push('balanced policy: block override pending: confirmation missing');
     }
+    if (!nonceConflict && hasStrongOverride && !hasValidReason) {
+      notes.push('balanced policy: block override pending: reason missing or too short');
+    }
 
     notes.push('balanced policy: block needs strong override token + strong override token + reason + confirmation');
     return {
@@ -347,6 +353,9 @@ export function planInstallAction(
 
   if (override.valid && hasValidReason && !context.confirmed) {
     notes.push('fast policy: block override pending: confirmation missing');
+  }
+  if (override.valid && !hasValidReason) {
+    notes.push('fast policy: block override pending: reason missing or too short');
   }
 
   notes.push('fast policy: block needs strong override token + reason + confirmation');

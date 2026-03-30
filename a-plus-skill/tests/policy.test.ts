@@ -84,6 +84,14 @@ describe('policy', () => {
     expect(pending.canInstall).toBe(false);
     expect(pending.notes).toContain('hold override pending: confirmation missing');
 
+    const missingReason = planInstallAction('strict', 'hold', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken({ nonce: 'MnOpQrStUvWxYzAbCdEfGhIj' }),
+      overrideReason: 'short'
+    });
+    expect(missingReason.canInstall).toBe(false);
+    expect(missingReason.notes).toContain('hold override pending: reason missing or too short');
+
     const allowed = planInstallAction('strict', 'hold', {
       confirmed: true,
       overrideToken: makeCurrentOverrideToken({ nonce: 'ZyXwVuTsRqPoNmLkJiHgFeDc' }),
@@ -120,6 +128,15 @@ describe('policy', () => {
     expect(pending.canInstall).toBe(false);
     expect(pending.notes).toContain('balanced policy: block override pending: confirmation missing');
 
+    const missingReason = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken({ nonce: 'MnOpQrStUvWxYzAbCdEfGhIj' }),
+      strongOverrideToken: makeCurrentOverrideToken({ nonce: 'QwErTyUiOpAsDfGhJkLzXcVb' }),
+      overrideReason: 'short'
+    });
+    expect(missingReason.canInstall).toBe(false);
+    expect(missingReason.notes).toContain('balanced policy: block override pending: reason missing or too short');
+
     const allowed = planInstallAction('balanced', 'block', {
       confirmed: true,
       overrideToken: makeCurrentOverrideToken({ nonce: 'MnOpQrStUvWxYzAbCdEfGhIj' }),
@@ -144,6 +161,14 @@ describe('policy', () => {
     });
     expect(pending.canInstall).toBe(false);
     expect(pending.notes).toContain('fast policy: block override pending: confirmation missing');
+
+    const missingReason = planInstallAction('fast', 'block', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken({ nonce: 'MnOpQrStUvWxYzAbCdEfGhIj' }),
+      overrideReason: 'short'
+    });
+    expect(missingReason.canInstall).toBe(false);
+    expect(missingReason.notes).toContain('fast policy: block override pending: reason missing or too short');
 
     const allowed = planInstallAction('fast', 'block', {
       confirmed: true,
