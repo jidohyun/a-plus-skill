@@ -57,6 +57,19 @@ REPORT_DELIVERY=discord-dm npm run report:send
 REPORT_DELIVERY=telegram npm run report:send
 ```
 
+리포트 형식 예시:
+```text
+📊 A+ 주간 추천 리포트
+source=live degraded=false fallbackReason=NONE fetchedAt=2026-03-30T00:00:00.000Z
+decisions recommend=2 caution=1 hold=1 block=1
+
+1. demo/weather | score 82.5 | security 90 | recommend | action auto-install | why trusted author; strong security score
+2. demo/agent | score 61.0 | security 58 | caution | why active installs growing; score near caution threshold
+```
+- 헤더의 `decisions ...` 줄은 전체 추천 분포를 보여줍니다.
+- 각 항목의 `why ...`는 `reasons[]` 중 상위 2개를 요약한 것입니다.
+- `fallbackReason`이 `NONE`이 아니면 collector가 fallback 경로였다는 뜻입니다.
+
 > 보안 주의: 토큰을 커맨드라인 인라인으로 넣지 마세요. shell history/process list에 남을 수 있습니다.
 > Telegram은 Bot API 제한(429)을 반환할 수 있으며, 본 구현은 `retry_after`를 파싱해 chunk 전송 재시도 지연(ms)으로 매핑합니다.
 > Telegram Bot API 특성상 토큰이 요청 URL 경로에 포함되므로, 프록시/APM/access log에 URL 원문을 남기지 않도록 운영 설정을 권장합니다.
