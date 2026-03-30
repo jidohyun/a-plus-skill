@@ -132,4 +132,44 @@ describe('weekly report render', () => {
     expect(out).toContain('topSignals trend=91.0, security=88.0');
     expect(out).not.toContain('fit=42.0, stability=12.0');
   });
+
+  it('adds conservative takeaway when collector is degraded', () => {
+    const meta: CollectorMeta = {
+      source: 'fallback',
+      degraded: true,
+      fallbackReason: 'FETCH_ERROR_TIMEOUT',
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    };
+
+    const out = renderWeeklyReport([makeItem()], meta);
+    expect(out).toContain('takeaway collector fallback active (FETCH_ERROR_TIMEOUT); treat recommendations conservatively');
+  });
+
+  it('adds block-focused takeaway when blocked items exist', () => {
+    const meta: CollectorMeta = {
+      source: 'live',
+      degraded: false,
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    };
+
+    const out = renderWeeklyReport([
+      makeItem({ decision: 'block' }),
+      makeItem({ slug: 'two/skill', decision: 'recommend' })
+    ], meta);
+    expect(out).toContain('takeaway block decisions are present; review risk-sensitive skills first');
+  });
+
+  it('adds strong-cycle takeaway when only recommends are present', () => {
+    const meta: CollectorMeta = {
+      source: 'live',
+      degraded: false,
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    };
+
+    const out = renderWeeklyReport([
+      makeItem({ slug: 'one/skill', decision: 'recommend' }),
+      makeItem({ slug: 'two/skill', decision: 'recommend' })
+    ], meta);
+    expect(out).toContain('takeaway recommendation quality looks strong this cycle');
+  });
 });

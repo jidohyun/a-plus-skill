@@ -48,11 +48,43 @@ function summarizeTopSignals(item: RecommendationResult): string {
     .join(', ');
 }
 
+function buildTakeaway(items: RecommendationResult[], meta: CollectorMeta): string {
+  const counts = {
+    recommend: 0,
+    caution: 0,
+    hold: 0,
+    block: 0
+  };
+
+  for (const item of items) {
+    counts[item.decision] += 1;
+  }
+
+  if (meta.degraded) {
+    return `takeaway collector fallback active (${meta.fallbackReason ?? 'UNKNOWN'}); treat recommendations conservatively`;
+  }
+
+  if (counts.block > 0) {
+    return 'takeaway block decisions are present; review risk-sensitive skills first';
+  }
+
+  if (counts.hold > counts.recommend) {
+    return 'takeaway hold decisions dominate; current signals support a cautious install posture';
+  }
+
+  if (counts.recommend > 0 && counts.block === 0 && counts.hold === 0) {
+    return 'takeaway recommendation quality looks strong this cycle';
+  }
+
+  return 'takeaway mixed recommendation profile; review item-level explanations before acting';
+}
+
 export function renderWeeklyReport(items: RecommendationResult[], meta: CollectorMeta): string {
   const mode = meta.degraded ? 'fallback' : 'live';
   const fallbackReason = mode === 'fallback' ? meta.fallbackReason ?? 'UNKNOWN' : 'NONE';
   const decisionSummary = summarizeDecisionCounts(items);
-  const head = `📊 A+ 주간 추천 리포트\nsource=${mode} degraded=${meta.degraded} fallbackReason=${fallbackReason} fetchedAt=${meta.fetchedAt}\ndecisions ${decisionSummary}\n`;
+  const takeaway = buildTakeaway(items, meta);
+  const head = `📊 A+ 주간 추천 리포트\nsource=${mode} degraded=${meta.degraded} fallbackReason=${fallbackReason} fetchedAt=${meta.fetchedAt}\ndecisions ${decisionSummary}\n${takeaway}\n`;
   const body = items
     .slice(0, 5)
     .map((it, i) => {
