@@ -264,6 +264,17 @@ npm run audit:verify
 INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 ```
 
+#### 설치 결과 요약
+```bash
+# 최근 24시간 설치 결과 요약
+npm run install:summary
+
+# 최근 6시간 설치 결과 요약
+npm run install:summary -- --hours 6
+```
+- action/status/error/note 빈도를 집계합니다.
+- 최근 3개 install audit 이벤트를 함께 보여줍니다.
+
 #### 운영 상태 점검 (`ops:status`)
 ```bash
 # 운영 상태 단일 라인 점검 (key=value)
