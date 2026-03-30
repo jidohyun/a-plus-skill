@@ -63,11 +63,13 @@ REPORT_DELIVERY=telegram npm run report:send
 source=live degraded=false fallbackReason=NONE fetchedAt=2026-03-30T00:00:00.000Z
 decisions recommend=2 caution=1 hold=1 block=1
 
-1. demo/weather | score 82.5 | security 90 | recommend | action auto-install | why trusted author; strong security score
-2. demo/agent | score 61.0 | security 58 | caution | why active installs growing; score near caution threshold
+1. demo/weather | score 82.5 | security 90 | recommend | action auto-install | recommended because the overall profile is strong | topSignals security=90.0, trend=82.0 | why trusted author; strong security score
+2. demo/agent | score 61.0 | security 58 | caution | cautioned because some signals are mixed | topSignals trend=66.0, stability=61.0 | why active installs growing; score near caution threshold
 ```
 - 헤더의 `decisions ...` 줄은 전체 추천 분포를 보여줍니다.
-- 각 항목의 `why ...`는 `reasons[]` 중 상위 2개를 요약한 것입니다.
+- 각 항목에는 decision 자연어 설명문이 포함됩니다.
+- `topSignals ...`는 fit/trend/stability/security 중 상위 2개 축을 보여줍니다.
+- `why ...`는 `reasons[]` 중 상위 2개를 요약한 것입니다.
 - `fallbackReason`이 `NONE`이 아니면 collector가 fallback 경로였다는 뜻입니다.
 
 > 보안 주의: 토큰을 커맨드라인 인라인으로 넣지 마세요. shell history/process list에 남을 수 있습니다.

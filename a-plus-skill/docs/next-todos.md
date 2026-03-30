@@ -23,6 +23,12 @@
   - weekly report now exposes `fallbackReason`
   - parser now supports embedded JSON from `data-skills`, `data-page`, `data-state`, `data-props`
   - `collector-status` now exposes richer diagnostics (`degraded`, `skillCount`, `fetchTimeoutMs`)
+- Weekly report explainability improved:
+  - header now exposes decision distribution summary
+  - each item now includes natural-language decision narrative
+  - each item now includes `topSignals` (top 2 scoring axes)
+  - each item now includes concise `why` reason summary
+  - README examples updated to match the richer report format
 - Report delivery visibility improved:
   - delivery log entries now include `collector_source`, `collector_degraded`, `collector_reason`
   - `delivery:failures` now summarizes by collector source/reason
