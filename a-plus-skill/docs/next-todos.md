@@ -30,6 +30,7 @@
 - Policy/install guidance improved:
   - override pending notes now distinguish `confirmation missing`
   - override pending notes now distinguish `reason missing or too short`
+  - balanced block notes now distinguish missing/invalid primary vs strong override token
   - README now documents how to interpret these pending/rejected notes
 
 ## Current recommended next work

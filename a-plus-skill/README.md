@@ -147,6 +147,10 @@ npm run collector:status -- --strict
 - note 가이던스(설치가 왜 막혔는지 설명):
   - confirmation만 빠졌으면 `... override pending: confirmation missing`
   - reason이 비었거나 너무 짧으면 `... override pending: reason missing or too short`
+  - balanced block에서 토큰 조건이 부족하면
+    - `... primary override token missing or invalid`
+    - `... strong override token missing or invalid`
+  - identical token 사용 시 `balanced policy: override tokens must be distinct`
   - nonce 재사용이면 `... rejected: nonce replay ...`
 - 토폴로지 가드레일:
   - `INSTALL_TOPOLOGY` 지원값: `local-dev | single-instance | multi-instance` (기본 `single-instance`)
