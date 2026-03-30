@@ -109,4 +109,27 @@ describe('weekly report render', () => {
     expect(out).toContain('held because the current signal is not strong enough');
     expect(out).toContain('blocked because risk or confidence thresholds were missed');
   });
+
+  it('includes top scoring signals for each item', () => {
+    const meta: CollectorMeta = {
+      source: 'live',
+      degraded: false,
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    };
+
+    const out = renderWeeklyReport(
+      [
+        makeItem({
+          fitScore: 42,
+          trendScore: 91,
+          stabilityScore: 12,
+          securityScore: 88
+        })
+      ],
+      meta
+    );
+
+    expect(out).toContain('topSignals trend=91.0, security=88.0');
+    expect(out).not.toContain('fit=42.0, stability=12.0');
+  });
 });

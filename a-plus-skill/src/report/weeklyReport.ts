@@ -34,6 +34,20 @@ function explainDecision(decision: RecommendationResult['decision']): string {
   }
 }
 
+function summarizeTopSignals(item: RecommendationResult): string {
+  const scored: Array<[string, number]> = [
+    ['fit', item.fitScore] as [string, number],
+    ['trend', item.trendScore] as [string, number],
+    ['stability', item.stabilityScore] as [string, number],
+    ['security', item.securityScore] as [string, number]
+  ].sort((a, b) => b[1] - a[1]);
+
+  return scored
+    .slice(0, 2)
+    .map(([label, score]) => `${label}=${Number(score).toFixed(1)}`)
+    .join(', ');
+}
+
 export function renderWeeklyReport(items: RecommendationResult[], meta: CollectorMeta): string {
   const mode = meta.degraded ? 'fallback' : 'live';
   const fallbackReason = mode === 'fallback' ? meta.fallbackReason ?? 'UNKNOWN' : 'NONE';
@@ -45,8 +59,9 @@ export function renderWeeklyReport(items: RecommendationResult[], meta: Collecto
       const outcome = it.installOutcome ? ` | outcome ${it.installOutcome.status}` : '';
       const action = it.installAction ? ` | action ${it.installAction}` : '';
       const narrative = ` | ${explainDecision(it.decision)}`;
+      const topSignals = ` | topSignals ${summarizeTopSignals(it)}`;
       const reasons = ` | why ${summarizeReasons(it.reasons)}`;
-      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}${narrative}${reasons}`;
+      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}${narrative}${topSignals}${reasons}`;
     })
     .join('\n');
 
