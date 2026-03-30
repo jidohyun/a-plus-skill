@@ -265,6 +265,11 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
       return fallbackResult('HTML_TOO_LARGE');
     }
 
+    if (!html.trim()) {
+      console.warn('[collector] ClawHub returned empty HTML body; falling back.');
+      return fallbackResult('EMPTY_HTML');
+    }
+
     const parsed = parseSkillsFromHtml(html);
 
     if (parsed.length < minParsedSkills) {

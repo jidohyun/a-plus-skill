@@ -180,6 +180,19 @@ describe('collector', () => {
     expect(result.meta.fallbackReason).toBe('HTML_TOO_LARGE');
   });
 
+  it('falls back when ClawHub returns empty or whitespace HTML', async () => {
+    const emptyFetch: typeof fetch = async () =>
+      new Response('   \n\t  ', {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      });
+
+    const result = await fetchCandidateSkills(emptyFetch);
+    expect(result.meta.source).toBe('fallback');
+    expect(result.meta.degraded).toBe(true);
+    expect(result.meta.fallbackReason).toBe('EMPTY_HTML');
+  });
+
   it('falls back to default MIN_PARSED_SKILLS for invalid env values', async () => {
     const twoSkillsHtml = `
       <html><body><script>{"skills":[
