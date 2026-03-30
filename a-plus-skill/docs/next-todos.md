@@ -32,6 +32,10 @@
   - override pending notes now distinguish `reason missing or too short`
   - balanced block notes now distinguish missing/invalid primary vs strong override token
   - README now documents how to interpret these pending/rejected notes
+- Operator tooling / maintenance UX improved:
+  - added `npm run maintenance:status`
+  - bundles `ops:status:gate`, `collector:status`, `fast-cap:inspect`, `delivery:failures`
+  - returns exit `2` when the ops gate fails, otherwise `0`
 
 ## Current recommended next work
 
