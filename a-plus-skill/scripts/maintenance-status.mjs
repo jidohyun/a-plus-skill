@@ -40,30 +40,41 @@ const collectorMode = collectorModeMatch?.[1] ?? 'unknown';
 const fastCapReason = fastCapReasonMatch?.[1] ?? 'unknown';
 const deliveryFailures = Number.parseInt(deliveryFailuresMatch?.[1] ?? '-1', 10);
 
+const hasOpsGateFailure = (opsGate?.code ?? 1) !== 0;
+const hasFastCapAttention = fastCapReason !== '"not_initialized"' && fastCapReason !== '"none"' && fastCapReason !== 'none';
+const hasCollectorFallback = collectorMode === 'fallback';
+const hasDeliveryFailures = Number.isFinite(deliveryFailures) && deliveryFailures > 0;
+const issueCount = [hasOpsGateFailure, hasFastCapAttention, hasCollectorFallback, hasDeliveryFailures].filter(Boolean).length;
+
 let overall = 'healthy';
 let primaryIssue = 'none';
 let recommendedAction = 'none';
+let severity = 'info';
 
-if ((opsGate?.code ?? 1) !== 0) {
+if (hasOpsGateFailure) {
   overall = 'nonhealthy';
   primaryIssue = 'ops_gate_fail';
   recommendedAction = 'run npm run ops:status and inspect critical_flags';
-} else if (fastCapReason !== '"not_initialized"' && fastCapReason !== '"none"' && fastCapReason !== 'none') {
+  severity = 'critical';
+} else if (hasFastCapAttention) {
   overall = 'degraded';
   primaryIssue = 'fast_cap_attention';
   recommendedAction = 'run npm run fast-cap:inspect and follow fast-cap runbook';
-} else if (collectorMode === 'fallback') {
+  severity = 'high';
+} else if (hasCollectorFallback) {
   overall = 'degraded';
   primaryIssue = 'collector_fallback';
   recommendedAction = 'inspect collector_status reason and upstream ClawHub reachability';
-} else if (Number.isFinite(deliveryFailures) && deliveryFailures > 0) {
+  severity = 'medium';
+} else if (hasDeliveryFailures) {
   overall = 'degraded';
   primaryIssue = 'delivery_failures';
   recommendedAction = 'run npm run delivery:failures -- --hours 24';
+  severity = 'medium';
 }
 
 console.log(
-  `maintenance_status overall=${overall} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown'} primary_issue=${JSON.stringify(primaryIssue)} recommended_action=${JSON.stringify(recommendedAction)}`
+  `maintenance_status overall=${overall} severity=${severity} issue_count=${issueCount} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown'} primary_issue=${JSON.stringify(primaryIssue)} recommended_action=${JSON.stringify(recommendedAction)}`
 );
 console.log('');
 

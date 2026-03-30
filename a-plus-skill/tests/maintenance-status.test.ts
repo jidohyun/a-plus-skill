@@ -18,6 +18,8 @@ describe('maintenance-status script', () => {
 
     expect([0, 2]).toContain(result.status ?? 1);
     expect(result.stdout).toContain('maintenance_status overall=');
+    expect(result.stdout).toContain('severity=');
+    expect(result.stdout).toContain('issue_count=');
     expect(result.stdout).toContain('ops_gate_code=');
     expect(result.stdout).toContain('collector_mode=');
     expect(result.stdout).toContain('fast_cap_reason=');
