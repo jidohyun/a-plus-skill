@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 const cwd = process.cwd();
 const nodeBin = process.execPath;
 const tsxLoader = resolve(cwd, 'node_modules', 'tsx', 'dist', 'loader.mjs');
+const jsonMode = process.argv.includes('--json');
 
 function run(label, command, args) {
   try {
@@ -73,17 +74,44 @@ if (hasOpsGateFailure) {
   severity = 'medium';
 }
 
-console.log(
-  `maintenance_status overall=${overall} severity=${severity} issue_count=${issueCount} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown'} primary_issue=${JSON.stringify(primaryIssue)} recommended_action=${JSON.stringify(recommendedAction)}`
-);
-console.log('');
+const hasHardFailure = checks.some((check) => check.label === 'ops_status_gate' && check.code !== 0);
+const summary = {
+  overall,
+  severity,
+  issue_count: issueCount,
+  ops_gate_code: opsGate?.code ?? 'unknown',
+  collector_mode: collectorMode,
+  fast_cap_reason: fastCapReason,
+  delivery_failures: Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown',
+  primary_issue: primaryIssue,
+  recommended_action: recommendedAction
+};
 
-for (const check of checks) {
-  const summary = check.stdout || check.stderr || '(no output)';
-  console.log(`[${check.label}] ok=${check.ok} code=${check.code}`);
-  console.log(summary);
+if (jsonMode) {
+  console.log(
+    JSON.stringify({
+      summary,
+      checks: checks.map((check) => ({
+        label: check.label,
+        ok: check.ok,
+        code: check.code,
+        stdout: check.stdout,
+        stderr: check.stderr ?? ''
+      }))
+    })
+  );
+} else {
+  console.log(
+    `maintenance_status overall=${overall} severity=${severity} issue_count=${issueCount} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown'} primary_issue=${JSON.stringify(primaryIssue)} recommended_action=${JSON.stringify(recommendedAction)}`
+  );
   console.log('');
+
+  for (const check of checks) {
+    const body = check.stdout || check.stderr || '(no output)';
+    console.log(`[${check.label}] ok=${check.ok} code=${check.code}`);
+    console.log(body);
+    console.log('');
+  }
 }
 
-const hasHardFailure = checks.some((check) => check.label === 'ops_status_gate' && check.code !== 0);
 process.exit(hasHardFailure ? 2 : 0);

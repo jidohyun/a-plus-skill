@@ -31,4 +31,21 @@ describe('maintenance-status script', () => {
     expect(result.stdout).toContain('[fast_cap_inspect]');
     expect(result.stdout).toContain('[delivery_failures]');
   });
+
+  it('supports json output for automation', () => {
+    const result = spawnSync('node', [SCRIPT_PATH, '--json'], {
+      cwd: REPO_ROOT,
+      env: { ...process.env },
+      encoding: 'utf8'
+    });
+
+    expect([0, 2]).toContain(result.status ?? 1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.summary).toBeTruthy();
+    expect(parsed.summary.overall).toBeTruthy();
+    expect(parsed.summary.severity).toBeTruthy();
+    expect(typeof parsed.summary.issue_count).toBe('number');
+    expect(Array.isArray(parsed.checks)).toBe(true);
+    expect(parsed.checks.some((check: { label: string }) => check.label === 'ops_status_gate')).toBe(true);
+  });
 });

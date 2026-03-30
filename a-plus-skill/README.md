@@ -273,6 +273,9 @@ npm run ops:status
 # 첫 줄 예시: maintenance_status overall=healthy severity=info issue_count=0 ops_gate_code=0 collector_mode=live fast_cap_reason="not_initialized" delivery_failures=0 primary_issue="none" recommended_action="none"
 npm run maintenance:status
 
+# 자동화/cron용 JSON 출력
+npm run maintenance:status -- --json
+
 # fast-cap state/key 일관성 원인 점검
 # - 정상 일관성 또는 미초기화(not_initialized): exit 0
 # - 비정상/조사 필요: exit 2
