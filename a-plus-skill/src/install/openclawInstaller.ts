@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { loadInstallTopologyFromEnv } from './confirm.js';
 import {
@@ -13,6 +13,7 @@ import {
   getInstallAuditBootstrapMarkerPath,
   getInstallAuditPath
 } from './auditIntegrity.js';
+import { appendEvidenceLine } from './appendEvidence.js';
 import type { InstallAuditEvent, InstallOutcome, InstallPlan, InstallTopology } from '../types/index.js';
 
 export type InstallRunnerResult = {
@@ -451,7 +452,7 @@ export function writeInstallAuditEvent(event: Omit<InstallAuditEvent, 'hash' | '
     };
 
     writeInstallAuditAnchorIfMissing(file);
-    appendFileSync(file, `${JSON.stringify(signedEvent)}\n`, 'utf8');
+    appendEvidenceLine(file, `${JSON.stringify(signedEvent)}\n`);
     writeInstallAuditBootstrapMarkerIfMissing(file);
     writeInstallAuditBootstrapFuseIfMissing(file);
     writeInstallAuditBootstrapLatchIfMissing(file);

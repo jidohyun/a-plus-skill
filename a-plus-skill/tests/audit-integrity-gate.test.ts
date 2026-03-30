@@ -211,11 +211,11 @@ describe('audit integrity verification + gate policy', () => {
     process.env.STRICT_EVIDENCE_FAIL_OPEN_MAX = '2';
 
     vi.resetModules();
-    vi.doMock('node:fs', async () => {
-      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.doMock('../src/install/appendEvidence.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/install/appendEvidence.js')>('../src/install/appendEvidence.js');
       return {
         ...actual,
-        appendFileSync: vi.fn(() => {
+        appendEvidenceLine: vi.fn(() => {
           throw new Error('disk full');
         })
       };
@@ -248,7 +248,7 @@ describe('audit integrity verification + gate policy', () => {
       expect(state.consecutiveFailures).toBe(3);
     } finally {
       delete process.env.STRICT_EVIDENCE_FAIL_OPEN_MAX;
-      vi.doUnmock('node:fs');
+      vi.doUnmock('../src/install/appendEvidence.js');
       vi.resetModules();
       process.chdir(prevCwd);
       rmSync(tempDir, { recursive: true, force: true });
@@ -271,11 +271,11 @@ describe('audit integrity verification + gate policy', () => {
     writeFileSync(join(tempDir, 'data', 'strict-evidence-fail-state.json'), '{broken', 'utf8');
 
     vi.resetModules();
-    vi.doMock('node:fs', async () => {
-      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.doMock('../src/install/appendEvidence.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/install/appendEvidence.js')>('../src/install/appendEvidence.js');
       return {
         ...actual,
-        appendFileSync: vi.fn(() => {
+        appendEvidenceLine: vi.fn(() => {
           throw new Error('disk full');
         })
       };
@@ -287,7 +287,7 @@ describe('audit integrity verification + gate policy', () => {
       expect(run).toThrow(/ops_evidence_write_failed/);
       expect(run).toThrow(/strict_evidence_state_fault=parse_error/);
     } finally {
-      vi.doUnmock('node:fs');
+      vi.doUnmock('../src/install/appendEvidence.js');
       vi.resetModules();
       process.chdir(prevCwd);
       rmSync(tempDir, { recursive: true, force: true });
@@ -300,9 +300,6 @@ describe('audit integrity verification + gate policy', () => {
       const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
       return {
         ...actual,
-        appendFileSync: vi.fn(() => {
-          throw new Error('disk full');
-        }),
         readFileSync: vi.fn((path: Parameters<typeof actual.readFileSync>[0], ...args: unknown[]) => {
           if (String(path).includes('strict-evidence-fail-state.json')) {
             const err = new Error('EACCES: permission denied, open strict fail state');
@@ -310,6 +307,16 @@ describe('audit integrity verification + gate policy', () => {
             throw err;
           }
           return (actual.readFileSync as (...inner: unknown[]) => unknown)(path, ...args);
+        })
+      };
+    });
+
+    vi.doMock('../src/install/appendEvidence.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/install/appendEvidence.js')>('../src/install/appendEvidence.js');
+      return {
+        ...actual,
+        appendEvidenceLine: vi.fn(() => {
+          throw new Error('disk full');
         })
       };
     });
@@ -328,7 +335,7 @@ describe('audit integrity verification + gate policy', () => {
       expect(run).toThrow(/ops_evidence_write_failed/);
       expect(run).toThrow(/strict_evidence_state_fault=read_error:EACCES/);
     } finally {
-      vi.doUnmock('node:fs');
+      vi.doUnmock('../src/install/appendEvidence.js');
       vi.resetModules();
     }
   });
@@ -343,9 +350,6 @@ describe('audit integrity verification + gate policy', () => {
       const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
       return {
         ...actual,
-        appendFileSync: vi.fn(() => {
-          throw new Error('disk full');
-        }),
         writeFileSync: vi.fn((path: Parameters<typeof actual.writeFileSync>[0], ...args: unknown[]) => {
           if (String(path).includes('strict-evidence-fail-state.json')) {
             const err = new Error('EACCES: permission denied, open strict fail state');
@@ -353,6 +357,16 @@ describe('audit integrity verification + gate policy', () => {
             throw err;
           }
           return (actual.writeFileSync as (...inner: unknown[]) => unknown)(path, ...args);
+        })
+      };
+    });
+
+    vi.doMock('../src/install/appendEvidence.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/install/appendEvidence.js')>('../src/install/appendEvidence.js');
+      return {
+        ...actual,
+        appendEvidenceLine: vi.fn(() => {
+          throw new Error('disk full');
         })
       };
     });
@@ -371,7 +385,7 @@ describe('audit integrity verification + gate policy', () => {
       expect(run).toThrow(/ops_evidence_write_failed/);
       expect(run).toThrow(/fail_state_write_failed=.*EACCES/);
     } finally {
-      vi.doUnmock('node:fs');
+      vi.doUnmock('../src/install/appendEvidence.js');
       vi.resetModules();
       process.chdir(prevCwd);
       rmSync(tempDir, { recursive: true, force: true });
@@ -411,17 +425,17 @@ describe('audit integrity verification + gate policy', () => {
     expect(warn.mock.calls.some((args) => String(args[0] ?? '').includes('fail-state reset failed'))).toBe(true);
 
     warn.mockRestore();
-    vi.doUnmock('node:fs');
+    vi.doUnmock('../src/install/appendEvidence.js');
     vi.resetModules();
   });
 
   it('keeps balanced demote + warns stronger when ops evidence primary/fallback both fail', async () => {
     vi.resetModules();
-    vi.doMock('node:fs', async () => {
-      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.doMock('../src/install/appendEvidence.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/install/appendEvidence.js')>('../src/install/appendEvidence.js');
       return {
         ...actual,
-        appendFileSync: vi.fn(() => {
+        appendEvidenceLine: vi.fn(() => {
           throw new Error('disk full');
         })
       };
@@ -442,7 +456,7 @@ describe('audit integrity verification + gate policy', () => {
     expect(warn.mock.calls.some((args) => String(args[0] ?? '').includes('evidence write failed'))).toBe(true);
 
     warn.mockRestore();
-    vi.doUnmock('node:fs');
+    vi.doUnmock('../src/install/appendEvidence.js');
     vi.resetModules();
   });
 });

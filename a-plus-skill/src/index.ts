@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -22,6 +22,7 @@ import { sendWeeklyReport } from './delivery/reportSender.js';
 import { securityScore } from './security/riskScoring.js';
 import type { InstallOutcome, InstallPlan, Policy, ProfileConfig, RecommendationResult } from './types/index.js';
 import { getSafeDefaultProfile, normalizeRegistry, resolveProfile } from './profile/normalize.js';
+import { appendEvidenceLine } from './install/appendEvidence.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const profileConfigPath = resolve(currentDir, '../config/profile.default.json');
@@ -101,13 +102,12 @@ export function appendInstallOpsEvent(
 ): InstallOpsEventAppendResult {
   try {
     mkdirSync(dirname(targetPath), { recursive: true });
-    appendFileSync(
+    appendEvidenceLine(
       targetPath,
       `${JSON.stringify({
         ts: new Date().toISOString(),
         ...event
-      })}\n`,
-      'utf8'
+      })}\n`
     );
     return { ok: true, path: targetPath };
   } catch (error) {
