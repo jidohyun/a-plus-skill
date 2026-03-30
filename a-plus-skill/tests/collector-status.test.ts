@@ -62,4 +62,21 @@ describe('collector-status script', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('supports json output for automation', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'collector-status-json-'));
+    try {
+      const result = runCollectorStatus({ MIN_PARSED_SKILLS: '3' }, ['--json'], dir);
+      expect(result.status).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.mode).toBeTruthy();
+      expect(typeof parsed.degraded).toBe('boolean');
+      expect(typeof parsed.threshold).toBe('number');
+      expect(typeof parsed.skillCount).toBe('number');
+      expect(typeof parsed.fetchTimeoutMs).toBe('number');
+      expect(parsed.fetchedAt).toBeTruthy();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

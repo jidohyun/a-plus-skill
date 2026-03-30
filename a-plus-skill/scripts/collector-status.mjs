@@ -1,6 +1,7 @@
 import { fetchCandidateSkills, resolveClawhubFetchTimeoutMs, resolveMinParsedSkills } from '../src/collector/clawhubClient.ts';
 
 const strict = process.argv.includes('--strict') || process.env.COLLECTOR_STATUS_STRICT === 'true';
+const jsonMode = process.argv.includes('--json');
 
 const result = await fetchCandidateSkills();
 const mode = result.meta.source;
@@ -10,9 +11,23 @@ const skillCount = result.skills.length;
 const degraded = result.meta.degraded;
 const fetchTimeoutMs = resolveClawhubFetchTimeoutMs();
 
-console.log(
-  `collector_status mode=${mode} degraded=${degraded} reason=${reason} threshold=${threshold} skillCount=${skillCount} fetchTimeoutMs=${fetchTimeoutMs} fetchedAt=${result.meta.fetchedAt}`
-);
+if (jsonMode) {
+  console.log(
+    JSON.stringify({
+      mode,
+      degraded,
+      reason,
+      threshold,
+      skillCount,
+      fetchTimeoutMs,
+      fetchedAt: result.meta.fetchedAt
+    })
+  );
+} else {
+  console.log(
+    `collector_status mode=${mode} degraded=${degraded} reason=${reason} threshold=${threshold} skillCount=${skillCount} fetchTimeoutMs=${fetchTimeoutMs} fetchedAt=${result.meta.fetchedAt}`
+  );
+}
 
 if (strict && mode === 'fallback') {
   process.exit(2);

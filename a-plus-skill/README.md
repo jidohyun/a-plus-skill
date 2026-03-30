@@ -165,12 +165,16 @@ npm run collector:status
 
 # fallback이면 실패 코드로 보고 싶을 때
 npm run collector:status -- --strict
+
+# 자동화/후처리용 JSON 출력
+npm run collector:status -- --json
 ```
 - `mode=live`면 `reason=NONE`, `degraded=false`
 - `mode=fallback`면 `reason`에 `fallbackReason` 코드가 출력됩니다.
 - `skillCount`는 현재 collector가 반환한 skill 개수입니다.
 - `fetchTimeoutMs`는 현재 적용 중인 ClawHub fetch timeout입니다.
 - `--strict`(또는 `COLLECTOR_STATUS_STRICT=true`)이면 fallback일 때 exit code `2`로 종료합니다.
+- `--json`은 `mode/degraded/reason/threshold/skillCount/fetchTimeoutMs/fetchedAt` 구조로 출력합니다.
 
 ## 실데이터 수집 동작
 - `src/collector/clawhubClient.ts`는 기본적으로 `https://clawhub.ai/skills?nonSuspicious=true`를 조회합니다.
