@@ -4,9 +4,9 @@ const PROFILE_TYPES: ProfileType[] = ['developer', 'automation', 'assistant'];
 
 const SAFE_DEFAULT_PROFILE: ProfileConfig = {
   type: 'developer',
-  focusKeywords: [],
-  avoidKeywords: [],
-  preferredAuthors: []
+  focusKeywords: ['dev', 'code', 'api', 'typescript'],
+  avoidKeywords: ['social', 'finance', 'marketing'],
+  preferredAuthors: ['openclaw', 'core-team']
 };
 
 export function isProfileType(value: unknown): value is ProfileType {

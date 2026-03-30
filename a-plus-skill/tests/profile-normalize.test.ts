@@ -51,9 +51,13 @@ describe('profile normalization', () => {
 
   it('returns isolated arrays in safe default profile', () => {
     const first = getSafeDefaultProfile();
+    const original = [...first.focusKeywords];
     first.focusKeywords.push('mutated');
 
     const second = getSafeDefaultProfile();
-    expect(second.focusKeywords).toEqual([]);
+    expect(second.focusKeywords).toEqual(original);
+    expect(second.focusKeywords).toContain('typescript');
+    expect(second.avoidKeywords).toContain('social');
+    expect(second.preferredAuthors).toContain('openclaw');
   });
 });
