@@ -77,6 +77,10 @@ REPORT_DELIVERY=telegram npm run report:send
 - 기록 내용: event/chunk 번호/시도 횟수/code/status (lock_mismatch는 `expected`/`actual` 포함)
   - 성공 시: `event=delivery_success mode=... chunk=.../... attempt=.../...`
   - 실패 시(기존 호환): `event=delivery_failed ...`
+- collector 컨텍스트가 있으면 아래 필드도 함께 기록됩니다.
+  - `collector_source=live|fallback`
+  - `collector_degraded=true|false`
+  - `collector_reason=NONE|<fallbackReason>`
 - 주요 reason
   - `lock_mismatch`: `REPORT_DELIVERY`가 `REPORT_DELIVERY_LOCKED`와 불일치
   - `unsupported REPORT_DELIVERY mode`: 지원하지 않는 전송 모드
@@ -90,6 +94,7 @@ npm run delivery:failures
 # 최근 6시간
 npm run delivery:failures -- --hours 6
 ```
+- 요약 출력에는 `by collector source`, `by collector reason`이 포함되어 live/fallback 맥락까지 함께 집계됩니다.
 
 ## 테스트
 ```bash
