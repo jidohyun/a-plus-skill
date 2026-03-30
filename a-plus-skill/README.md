@@ -227,6 +227,9 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 # 운영 상태 단일 라인 점검 (key=value)
 npm run ops:status
 
+# fast-cap state/key 일관성 원인 점검 (정상=exit 0, 비정상=exit 2)
+npm run fast-cap:inspect
+
 # strict 모드(기본 unhealthy): overall=unhealthy일 때만 exit 2
 npm run ops:status -- --strict
 

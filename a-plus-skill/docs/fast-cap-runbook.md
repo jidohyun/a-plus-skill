@@ -113,13 +113,14 @@ Why:
 ## Suggested operator checklist
 When `fast_cap_tampered=true` appears:
 1. Run `npm run ops:status`
-2. Inspect both files:
+2. Run `npm run fast-cap:inspect`
+3. Inspect both files when needed:
    - `ls -l data/fast-audit-fail-cap*`
    - `cat data/fast-audit-fail-cap.json`
    - `cat data/fast-audit-fail-cap.key`
-3. Determine which tamper class applies
-4. Preserve evidence if unexplained
-5. Only then choose:
+4. Determine which tamper class applies
+5. Preserve evidence if unexplained
+6. Only then choose:
    - keep for investigation
    - remove both files for explicit reset
    - fix permissions/storage and retry
