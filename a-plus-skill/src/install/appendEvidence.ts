@@ -1,5 +1,11 @@
-import { appendFileSync } from 'node:fs';
+import { closeSync, fsyncSync, openSync, writeSync } from 'node:fs';
 
 export function appendEvidenceLine(path: string, line: string): void {
-  appendFileSync(path, line, 'utf8');
+  const fd = openSync(path, 'a');
+  try {
+    writeSync(fd, line, undefined, 'utf8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
