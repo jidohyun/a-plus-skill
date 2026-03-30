@@ -16,6 +16,12 @@ describe('buildReasons', () => {
     expect(reasons).toContain('보안 신호는 통과했지만 상위 추천 기준에는 못 미칩니다.');
   });
 
+  it('prioritizes gate-oriented reasons before weaker secondary signals', () => {
+    const reasons = buildReasons({ fitScore: 40, trendScore: 30, securityScore: 20 });
+    expect(reasons[0]).toBe('보안 게이트 기준을 넘지 못해 차단이 권장됩니다.');
+    expect(reasons[1]).toBe('사용자 프로필과의 적합도가 낮아 우선순위가 떨어집니다.');
+  });
+
   it('emits gate-oriented reason when security is below block threshold', () => {
     const reasons = buildReasons({ fitScore: 90, trendScore: 90, securityScore: 20 });
     expect(reasons).toContain('보안 게이트 기준을 넘지 못해 차단이 권장됩니다.');
