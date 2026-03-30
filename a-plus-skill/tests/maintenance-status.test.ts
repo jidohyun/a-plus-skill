@@ -9,7 +9,7 @@ const REPO_ROOT = resolve(THIS_DIR, '..');
 const SCRIPT_PATH = resolve(REPO_ROOT, 'scripts', 'maintenance-status.mjs');
 
 describe('maintenance-status script', () => {
-  it('runs bundled maintenance checks and prints section headers', () => {
+  it('runs bundled maintenance checks and prints summary + section headers', () => {
     const result = spawnSync('node', [SCRIPT_PATH], {
       cwd: REPO_ROOT,
       env: { ...process.env },
@@ -17,6 +17,11 @@ describe('maintenance-status script', () => {
     });
 
     expect([0, 2]).toContain(result.status ?? 1);
+    expect(result.stdout).toContain('maintenance_status overall=');
+    expect(result.stdout).toContain('ops_gate_code=');
+    expect(result.stdout).toContain('collector_mode=');
+    expect(result.stdout).toContain('fast_cap_reason=');
+    expect(result.stdout).toContain('delivery_failures=');
     expect(result.stdout).toContain('[ops_status_gate]');
     expect(result.stdout).toContain('[collector_status]');
     expect(result.stdout).toContain('[fast_cap_inspect]');

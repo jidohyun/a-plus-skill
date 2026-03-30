@@ -243,6 +243,7 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 npm run ops:status
 
 # 유지보수용 묶음 점검(ops gate + collector + fast-cap + delivery summary)
+# 첫 줄 예시: maintenance_status overall=healthy ops_gate_code=0 collector_mode=live fast_cap_reason="not_initialized" delivery_failures=0
 npm run maintenance:status
 
 # fast-cap state/key 일관성 원인 점검

@@ -29,6 +29,23 @@ const checks = [
   run('delivery_failures', 'npm', ['run', 'delivery:failures', '--silent', '--', '--hours', '24'])
 ];
 
+const opsGate = checks.find((check) => check.label === 'ops_status_gate');
+const collector = checks.find((check) => check.label === 'collector_status');
+const fastCap = checks.find((check) => check.label === 'fast_cap_inspect');
+const delivery = checks.find((check) => check.label === 'delivery_failures');
+const overall = opsGate?.code === 0 ? 'healthy' : 'nonhealthy';
+const collectorModeMatch = collector?.stdout.match(/\bmode=([^\s]+)/);
+const fastCapReasonMatch = fastCap?.stdout.match(/\breason=("(?:\\.|[^"])*"|[^\s]+)/);
+const deliveryFailuresMatch = delivery?.stdout.match(/- failures: (\d+)/);
+const collectorMode = collectorModeMatch?.[1] ?? 'unknown';
+const fastCapReason = fastCapReasonMatch?.[1] ?? 'unknown';
+const deliveryFailures = deliveryFailuresMatch?.[1] ?? 'unknown';
+
+console.log(
+  `maintenance_status overall=${overall} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${deliveryFailures}`
+);
+console.log('');
+
 for (const check of checks) {
   const summary = check.stdout || check.stderr || '(no output)';
   console.log(`[${check.label}] ok=${check.ok} code=${check.code}`);
