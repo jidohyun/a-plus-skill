@@ -118,6 +118,7 @@ describe('policy', () => {
       overrideToken: makeCurrentOverrideToken()
     });
     expect(denied.canInstall).toBe(false);
+    expect(denied.notes).toContain('balanced policy: block override pending: strong override token missing or invalid');
 
     const pending = planInstallAction('balanced', 'block', {
       confirmed: false,
@@ -145,6 +146,37 @@ describe('policy', () => {
     });
     expect(allowed.canInstall).toBe(true);
     expect(allowed.action).toBe('override-install');
+  });
+
+  it('balanced block notes identify which override token condition is missing', () => {
+    const missingPrimary = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      strongOverrideToken: makeCurrentOverrideToken(),
+      overrideReason: 'business critical'
+    });
+    expect(missingPrimary.canInstall).toBe(false);
+    expect(missingPrimary.notes).toContain('balanced policy: block override pending: primary override token missing or invalid');
+
+    const missingStrong = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      overrideToken: makeCurrentOverrideToken(),
+      overrideReason: 'business critical'
+    });
+    expect(missingStrong.canInstall).toBe(false);
+    expect(missingStrong.notes).toContain('balanced policy: block override pending: strong override token missing or invalid');
+  });
+
+  it('balanced block still rejects identical override tokens early', () => {
+    const token = makeCurrentOverrideToken();
+    const plan = planInstallAction('balanced', 'block', {
+      confirmed: true,
+      overrideToken: token,
+      strongOverrideToken: token,
+      overrideReason: 'business critical'
+    });
+
+    expect(plan.canInstall).toBe(false);
+    expect(plan.notes).toContain('balanced policy: override tokens must be distinct');
   });
 
   it('fast policy allows block only with valid token + reason + confirmation', () => {

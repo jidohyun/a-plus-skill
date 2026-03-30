@@ -272,7 +272,9 @@ export function planInstallAction(
     const override = validateOverrideToken(context.overrideToken);
     const strongOverride = validateOverrideToken(context.strongOverrideToken);
     const hasValidReason = hasReason(context.overrideReason);
-    const hasStrongOverride = override.valid && strongOverride.valid;
+    const hasValidPrimaryOverride = override.valid;
+    const hasValidStrongOverride = strongOverride.valid;
+    const hasStrongOverride = hasValidPrimaryOverride && hasValidStrongOverride;
 
     const nonceConflict = Boolean(
       override.parsed && strongOverride.parsed && override.parsed.nonce === strongOverride.parsed.nonce
@@ -305,11 +307,20 @@ export function planInstallAction(
       };
     }
 
+    if (!hasValidPrimaryOverride) {
+      notes.push('balanced policy: block override pending: primary override token missing or invalid');
+    }
+    if (!hasValidStrongOverride) {
+      notes.push('balanced policy: block override pending: strong override token missing or invalid');
+    }
     if (!nonceConflict && hasStrongOverride && hasValidReason && !context.confirmed) {
       notes.push('balanced policy: block override pending: confirmation missing');
     }
     if (!nonceConflict && hasStrongOverride && !hasValidReason) {
       notes.push('balanced policy: block override pending: reason missing or too short');
+    }
+    if (nonceConflict) {
+      notes.push('balanced policy: block override pending: tokens must use distinct nonces');
     }
 
     notes.push('balanced policy: block needs strong override token + strong override token + reason + confirmation');
