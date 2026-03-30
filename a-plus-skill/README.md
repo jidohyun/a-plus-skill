@@ -97,6 +97,7 @@ takeaway mixed recommendation profile; review item-level explanations before act
 - `topSignals ...`는 fit/trend/stability/security 중 상위 2개 축을 보여줍니다.
 - `why ...`는 `reasons[]` 중 상위 2개를 요약한 것입니다.
 - `why` 문구는 `매우 강함 / 긍정적 / 약함 / 상위 추천 기준 미달 / 보안 게이트 미달` 같은 구간형 표현을 사용합니다.
+- reason 목록은 보안 게이트/threshold 기반 이유를 앞에 두도록 우선순위 정렬됩니다.
 - `fallbackReason`이 `NONE`이 아니면 collector가 fallback 경로였다는 뜻입니다.
 
 > 보안 주의: 토큰을 커맨드라인 인라인으로 넣지 마세요. shell history/process list에 남을 수 있습니다.
@@ -152,6 +153,7 @@ npm run scoring:calibration
 - 현재 collector 결과를 기준으로 fit/trend/stability/security/final 분포를 보여줍니다.
 - `decision_counts`를 함께 출력해 recommend/caution/hold/block 쏠림을 빠르게 확인할 수 있습니다.
 - 최근 보정에서는 `trend`가 과거 download bulk보다 `installsCurrent`(현재 활성도)를 더 반영하도록 가중치를 조정했습니다.
+- profile fallback 시에도 완전히 평평한 fit 점수가 나오지 않도록 safe default profile을 강화했습니다.
 
 ## collector 상태 확인
 ```bash
