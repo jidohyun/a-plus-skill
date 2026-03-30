@@ -41,6 +41,7 @@ describe('weekly report render', () => {
     const out = renderWeeklyReport([makeItem()], meta);
     expect(out).toContain('source=live');
     expect(out).toContain('fallbackReason=NONE');
+    expect(out).toContain('decisions recommend=1 caution=0 hold=0 block=0');
   });
 
   it('includes top recommendation reasons and limits them to two', () => {
@@ -64,5 +65,25 @@ describe('weekly report render', () => {
 
     const out = renderWeeklyReport([makeItem({ reasons: [] })], meta);
     expect(out).toContain('why reason unavailable');
+  });
+
+  it('includes decision distribution summary across report items', () => {
+    const meta: CollectorMeta = {
+      source: 'live',
+      degraded: false,
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    };
+
+    const out = renderWeeklyReport(
+      [
+        makeItem({ slug: 'one/skill', decision: 'recommend' }),
+        makeItem({ slug: 'two/skill', decision: 'caution' }),
+        makeItem({ slug: 'three/skill', decision: 'hold' }),
+        makeItem({ slug: 'four/skill', decision: 'block' })
+      ],
+      meta
+    );
+
+    expect(out).toContain('decisions recommend=1 caution=1 hold=1 block=1');
   });
 });
