@@ -22,6 +22,8 @@ describe('maintenance-status script', () => {
     expect(result.stdout).toContain('collector_mode=');
     expect(result.stdout).toContain('fast_cap_reason=');
     expect(result.stdout).toContain('delivery_failures=');
+    expect(result.stdout).toContain('primary_issue=');
+    expect(result.stdout).toContain('recommended_action=');
     expect(result.stdout).toContain('[ops_status_gate]');
     expect(result.stdout).toContain('[collector_status]');
     expect(result.stdout).toContain('[fast_cap_inspect]');

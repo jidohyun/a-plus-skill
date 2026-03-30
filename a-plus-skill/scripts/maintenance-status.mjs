@@ -33,16 +33,37 @@ const opsGate = checks.find((check) => check.label === 'ops_status_gate');
 const collector = checks.find((check) => check.label === 'collector_status');
 const fastCap = checks.find((check) => check.label === 'fast_cap_inspect');
 const delivery = checks.find((check) => check.label === 'delivery_failures');
-const overall = opsGate?.code === 0 ? 'healthy' : 'nonhealthy';
 const collectorModeMatch = collector?.stdout.match(/\bmode=([^\s]+)/);
 const fastCapReasonMatch = fastCap?.stdout.match(/\breason=("(?:\\.|[^"])*"|[^\s]+)/);
 const deliveryFailuresMatch = delivery?.stdout.match(/- failures: (\d+)/);
 const collectorMode = collectorModeMatch?.[1] ?? 'unknown';
 const fastCapReason = fastCapReasonMatch?.[1] ?? 'unknown';
-const deliveryFailures = deliveryFailuresMatch?.[1] ?? 'unknown';
+const deliveryFailures = Number.parseInt(deliveryFailuresMatch?.[1] ?? '-1', 10);
+
+let overall = 'healthy';
+let primaryIssue = 'none';
+let recommendedAction = 'none';
+
+if ((opsGate?.code ?? 1) !== 0) {
+  overall = 'nonhealthy';
+  primaryIssue = 'ops_gate_fail';
+  recommendedAction = 'run npm run ops:status and inspect critical_flags';
+} else if (fastCapReason !== '"not_initialized"' && fastCapReason !== '"none"' && fastCapReason !== 'none') {
+  overall = 'degraded';
+  primaryIssue = 'fast_cap_attention';
+  recommendedAction = 'run npm run fast-cap:inspect and follow fast-cap runbook';
+} else if (collectorMode === 'fallback') {
+  overall = 'degraded';
+  primaryIssue = 'collector_fallback';
+  recommendedAction = 'inspect collector_status reason and upstream ClawHub reachability';
+} else if (Number.isFinite(deliveryFailures) && deliveryFailures > 0) {
+  overall = 'degraded';
+  primaryIssue = 'delivery_failures';
+  recommendedAction = 'run npm run delivery:failures -- --hours 24';
+}
 
 console.log(
-  `maintenance_status overall=${overall} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${deliveryFailures}`
+  `maintenance_status overall=${overall} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown'} primary_issue=${JSON.stringify(primaryIssue)} recommended_action=${JSON.stringify(recommendedAction)}`
 );
 console.log('');
 
