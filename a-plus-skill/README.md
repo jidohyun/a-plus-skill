@@ -30,6 +30,30 @@ npm run dev
 
 > preflight가 devDependencies(typescript/vitest/tsx) 누락 시 즉시 실패시킵니다.
 
+## 빠른 시작 (처음 보는 사람용)
+```bash
+# 1) 의존성 설치
+npm ci --include=dev
+
+# 2) 현재 운영 상태 한 번에 확인
+npm run maintenance:status
+
+# 3) 추천 리포트 생성(기본: 콘솔 출력)
+npm run report:send
+
+# 4) 설치 감사 무결성 확인
+npm run audit:verify
+
+# 5) 최근 설치 결과 요약 확인
+npm run install:summary
+```
+
+추천 운영 루틴:
+- daily/수시 점검: `npm run maintenance:status`
+- weekly 리포트 확인: `npm run report:send`
+- 설치/정책 동작 확인: `npm run install:summary`
+- 감사 체인 검증: `npm run audit:verify`
+
 ## 리포트 전송 설정 (Discord DM / Telegram)
 - `REPORT_DELIVERY`: `none | discord-dm | telegram` (기본 `none`)
 - `REPORT_DELIVERY_LOCKED` (선택): `discord-dm` 또는 `telegram`으로 고정. 잠금값과 다르면 전송을 스킵하며 reason=`lock_mismatch`로 기록합니다.
@@ -333,6 +357,15 @@ npm run ops:status -- --strict=unhealthy
 - `fast_cap_tampered=true`는 운영자가 fast-cap state/key 쌍을 신뢰할 수 없다는 뜻입니다. partial delete(한쪽만 삭제)는 의도적으로 tamper로 간주합니다.
 - fast-cap 복구 시에는 `data/fast-audit-fail-cap.json` 또는 `.key` 한쪽만 지우지 말고, 원인 확인 후 **둘 다 함께 초기화**하거나 그대로 보존해 조사하세요.
 - 상세 운영 절차는 `docs/fast-cap-runbook.md`를 참고하세요.
+
+문제 생겼을 때 추천 순서:
+1. `npm run maintenance:status`
+2. summary의 `primary_issue` / `recommended_action` 확인
+3. 필요 시 세부 확인
+   - collector: `npm run collector:status -- --strict`
+   - fast-cap: `npm run fast-cap:inspect`
+   - delivery: `npm run delivery:failures -- --hours 24`
+   - install/audit: `npm run install:summary` / `npm run audit:verify`
 
 `--strict` 종료 규약:
 - 유효 strict mode: `unhealthy | nonhealthy`

@@ -43,6 +43,10 @@
   - added `npm run maintenance:status`
   - bundles `ops:status:gate`, `collector:status`, `fast-cap:inspect`, `delivery:failures`
   - returns exit `2` when the ops gate fails, otherwise `0`
+  - supports `--json` for automation use cases
+- Onboarding / operator workflow improved:
+  - README now includes a quickstart path for first-time operators
+  - README now includes a recommended troubleshooting order (`maintenance:status` → targeted drill-down)
 
 ## Current recommended next work
 
