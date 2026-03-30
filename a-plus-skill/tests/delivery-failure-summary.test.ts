@@ -84,4 +84,35 @@ describe('delivery failure summary script', () => {
     expect(stdout).toContain('- delivery_success: 1');
     expect(stdout).toContain('- weird_future_event: 1');
   });
+
+  it('groups delivery records by collector source and reason', async () => {
+    const workdir = await mkdtemp(resolve(tmpdir(), 'a-plus-summary-collector-'));
+    tempDirs.push(workdir);
+
+    const dataDir = resolve(workdir, 'data');
+    await mkdir(dataDir, { recursive: true });
+
+    const logPath = resolve(dataDir, 'report-delivery.log');
+
+    const now = new Date().toISOString();
+    const fixture = [
+      `${now} event=delivery_success mode=discord-dm collector_source=live collector_degraded=false collector_reason=NONE`,
+      `${now} event=delivery_failed mode=discord-dm code=NETWORK_ERROR collector_source=fallback collector_degraded=true collector_reason=FETCH_ERROR_TIMEOUT`,
+      `${now} event=delivery_failed mode=discord-dm code=NETWORK_ERROR collector_source=fallback collector_degraded=true collector_reason=EMPTY_HTML`
+    ].join('\n');
+
+    await writeFile(logPath, `${fixture}\n`, 'utf8');
+
+    const { stdout } = await execFileAsync('node', [scriptPath, '--hours', '1'], {
+      cwd: workdir
+    });
+
+    expect(stdout).toContain('by collector source');
+    expect(stdout).toContain('- fallback: 2');
+    expect(stdout).toContain('- live: 1');
+    expect(stdout).toContain('by collector reason');
+    expect(stdout).toContain('- FETCH_ERROR_TIMEOUT: 1');
+    expect(stdout).toContain('- EMPTY_HTML: 1');
+    expect(stdout).toContain('- NONE: 1');
+  });
 });

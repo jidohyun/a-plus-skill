@@ -92,6 +92,8 @@ async function main() {
   const categoryCounts = new Map();
   const codeCounts = new Map();
   const statusCounts = new Map();
+  const collectorSourceCounts = new Map();
+  const collectorReasonCounts = new Map();
 
   for (const rec of records) {
     const event = rec.fields.event ?? 'unknown';
@@ -99,6 +101,8 @@ async function main() {
     increment(categoryCounts, eventCategory(event));
     if (rec.fields.code) increment(codeCounts, rec.fields.code);
     if (rec.fields.status) increment(statusCounts, rec.fields.status);
+    if (rec.fields.collector_source) increment(collectorSourceCounts, rec.fields.collector_source);
+    if (rec.fields.collector_reason) increment(collectorReasonCounts, rec.fields.collector_reason);
   }
 
   console.log(`Delivery failures summary (last ${hours}h)`);
@@ -111,6 +115,8 @@ async function main() {
   printCounter('by event', eventCounts);
   printCounter('by code', codeCounts);
   printCounter('by status', statusCounts);
+  printCounter('by collector source', collectorSourceCounts);
+  printCounter('by collector reason', collectorReasonCounts);
 
   console.log('\nrecent 3');
   for (const rec of records.slice(0, 3)) {
