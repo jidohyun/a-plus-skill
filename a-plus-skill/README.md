@@ -217,6 +217,11 @@ npm run collector:status -- --strict
   - 결정/실행 필드: `originalDecision`, `effectiveDecision`, `action`, `canInstall`, `status`
   - 오류/성능 필드: `errorCode`, `timeoutMs`, `elapsedMs`
   - 상태 필드: `degraded`, `notes[]`
+- `notes[]`에는 왜 설치가 막혔는지/허용됐는지가 들어갑니다. 예:
+  - `hold override pending: confirmation missing`
+  - `hold override pending: reason missing or too short`
+  - `balanced policy: block override pending: strong override token missing or invalid`
+  - `balanced policy: override tokens must be distinct`
 - `prevHash`는 직전 이벤트의 `hash`와 연결됩니다(첫 이벤트는 `genesis`).
 - `hash`는 canonical payload 기준 `SHA-256`으로 계산되어 변조/누락 사후 검증에 사용됩니다.
 - 이벤트는 `skip-install/confirm-install/auto-install/override-install` 모두 기록됩니다.
@@ -225,7 +230,12 @@ npm run collector:status -- --strict
 
 예시:
 ```json
-{"schemaVersion":1,"eventId":"b7b4a276-1efe-498f-b9fa-d91d9323120e","ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","degraded":false,"notes":["hold requires strong override token + reason + confirmation"],"prevHash":"genesis","hash":"f56d..."}
+{"schemaVersion":1,"eventId":"b7b4a276-1efe-498f-b9fa-d91d9323120e","ts":"2026-03-07T12:00:00.000Z","slug":"acme/tool","policy":"strict","topology":"single-instance","originalDecision":"hold","effectiveDecision":"hold","action":"confirm-install","canInstall":false,"status":"skipped","degraded":false,"notes":["hold override pending: confirmation missing","strict policy: hold requires strong override token + reason + confirmation"],"prevHash":"genesis","hash":"f56d..."}
+```
+
+balanced block에서 strong token이 빠진 경우 예:
+```json
+{"schemaVersion":1,"eventId":"e15b8f62-7f5a-45fd-9c35-90db76e2bb56","ts":"2026-03-07T12:05:00.000Z","slug":"acme/tool","policy":"balanced","topology":"single-instance","originalDecision":"block","effectiveDecision":"block","action":"confirm-install","canInstall":false,"status":"skipped","degraded":false,"notes":["balanced policy: block override pending: strong override token missing or invalid","balanced policy: block needs strong override token + strong override token + reason + confirmation"],"prevHash":"f56d...","hash":"9ad1..."}
 ```
 
 #### 감사 로그 무결성 검증
