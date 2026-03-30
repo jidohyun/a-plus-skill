@@ -33,6 +33,7 @@
 - Recommendation quality tooling improved:
   - added `npm run scoring:calibration` to inspect score distributions and decision counts
   - trend weighting now gives more influence to current active installs vs pure historical download bulk
+  - final score weighting now gives slightly more emphasis to fit/stability vs raw trend/security
   - safe default profile now carries meaningful developer-oriented defaults instead of empty arrays
   - reason generation now uses more specific threshold/gate-oriented wording
   - recommendation reasons are now priority-sorted so gate/threshold issues appear before weaker secondary signals
