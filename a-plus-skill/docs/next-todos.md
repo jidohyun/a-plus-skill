@@ -15,6 +15,13 @@
   - `docs/fast-cap-runbook.md` added
   - `npm run fast-cap:inspect` added
   - `fast-cap:inspect` now treats missing state+key pair as `reason="not_initialized"` with exit `0`
+- Collector live-data robustness improved:
+  - fallback on `UNEXPECTED_CONTENT_TYPE`
+  - fallback on `HTML_TOO_LARGE` (content-length and post-read body size)
+  - fallback on `EMPTY_HTML`
+  - fetch timeout/abort guard with `FETCH_ERROR_TIMEOUT`
+  - weekly report now exposes `fallbackReason`
+  - parser now supports embedded JSON from `data-skills`, `data-page`, `data-state`, `data-props`
 
 ## Current recommended next work
 
@@ -30,9 +37,9 @@
 - Add short operator examples for explicit fast-cap reset vs preserve-for-investigation
 
 ### 3) Choose next major product/feature track (recommended)
-The current hardening/ops-status/fast-cap track is in a strong state.
+The current hardening/ops-status/fast-cap track is in a strong state, and the collector robustness pass has also advanced significantly.
 Next work should likely move to a new primary theme, e.g.:
-- collector / ClawHub live-data robustness
+- collector status UX / parsed-count visibility / richer diagnostics
 - report delivery UX/visibility
 - policy/install behavior refinement
 - operator tooling / maintenance UX
