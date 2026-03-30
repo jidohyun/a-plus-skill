@@ -73,8 +73,11 @@ describe('collector-status script', () => {
       expect(typeof parsed.degraded).toBe('boolean');
       expect(typeof parsed.threshold).toBe('number');
       expect(typeof parsed.skillCount).toBe('number');
+      expect(typeof parsed.skill_count).toBe('number');
       expect(typeof parsed.fetchTimeoutMs).toBe('number');
+      expect(typeof parsed.fetch_timeout_ms).toBe('number');
       expect(parsed.fetchedAt).toBeTruthy();
+      expect(parsed.fetched_at).toBeTruthy();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

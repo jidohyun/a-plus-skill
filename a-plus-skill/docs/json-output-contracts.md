@@ -119,14 +119,18 @@ These outputs are intended for automation, cron, wrappers, and downstream toolin
   "reason": "NONE|UNEXPECTED_CONTENT_TYPE|HTML_TOO_LARGE|EMPTY_HTML|FETCH_ERROR_TIMEOUT|...",
   "threshold": 3,
   "skillCount": 12,
+  "skill_count": 12,
   "fetchTimeoutMs": 10000,
-  "fetchedAt": "2026-03-30T00:00:00.000Z"
+  "fetch_timeout_ms": 10000,
+  "fetchedAt": "2026-03-30T00:00:00.000Z",
+  "fetched_at": "2026-03-30T00:00:00.000Z"
 }
 ```
 
 ### Notes
 - Exit code `2` remains the strict/fallback signal when `--strict` is used.
 - `reason=NONE` is only expected in live mode.
+- Snake-case aliases are included to make downstream JSON consumers easier to standardize.
 
 ## Consumer guidance
 - Prefer checking process exit code first for gate semantics.

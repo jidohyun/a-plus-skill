@@ -19,8 +19,11 @@ if (jsonMode) {
       reason,
       threshold,
       skillCount,
+      skill_count: skillCount,
       fetchTimeoutMs,
-      fetchedAt: result.meta.fetchedAt
+      fetch_timeout_ms: fetchTimeoutMs,
+      fetchedAt: result.meta.fetchedAt,
+      fetched_at: result.meta.fetchedAt
     })
   );
 } else {
