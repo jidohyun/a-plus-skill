@@ -22,6 +22,15 @@
   - fetch timeout/abort guard with `FETCH_ERROR_TIMEOUT`
   - weekly report now exposes `fallbackReason`
   - parser now supports embedded JSON from `data-skills`, `data-page`, `data-state`, `data-props`
+  - `collector-status` now exposes richer diagnostics (`degraded`, `skillCount`, `fetchTimeoutMs`)
+- Report delivery visibility improved:
+  - delivery log entries now include `collector_source`, `collector_degraded`, `collector_reason`
+  - `delivery:failures` now summarizes by collector source/reason
+  - README now documents delivery collector context fields
+- Policy/install guidance improved:
+  - override pending notes now distinguish `confirmation missing`
+  - override pending notes now distinguish `reason missing or too short`
+  - README now documents how to interpret these pending/rejected notes
 
 ## Current recommended next work
 
@@ -37,12 +46,11 @@
 - Add short operator examples for explicit fast-cap reset vs preserve-for-investigation
 
 ### 3) Choose next major product/feature track (recommended)
-The current hardening/ops-status/fast-cap track is in a strong state, and the collector robustness pass has also advanced significantly.
-Next work should likely move to a new primary theme, e.g.:
-- collector status UX / parsed-count visibility / richer diagnostics
-- report delivery UX/visibility
-- policy/install behavior refinement
+The current hardening/ops-status/fast-cap track is in a strong state, collector robustness/visibility is in a much better place, and report/policy guidance has also advanced.
+Next work should likely move to one of these themes:
+- deeper policy/install refinement (e.g. more specific missing-condition notes for balanced block paths)
 - operator tooling / maintenance UX
+- delivery/collector status integration beyond current summaries
 
 ## Notes for next session
 - Keep policy semantics unchanged:
