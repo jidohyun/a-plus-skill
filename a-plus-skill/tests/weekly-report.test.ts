@@ -86,4 +86,27 @@ describe('weekly report render', () => {
 
     expect(out).toContain('decisions recommend=1 caution=1 hold=1 block=1');
   });
+
+  it('adds natural-language decision explanations', () => {
+    const meta: CollectorMeta = {
+      source: 'live',
+      degraded: false,
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    };
+
+    const out = renderWeeklyReport(
+      [
+        makeItem({ slug: 'one/skill', decision: 'recommend' }),
+        makeItem({ slug: 'two/skill', decision: 'caution' }),
+        makeItem({ slug: 'three/skill', decision: 'hold' }),
+        makeItem({ slug: 'four/skill', decision: 'block' })
+      ],
+      meta
+    );
+
+    expect(out).toContain('recommended because the overall profile is strong');
+    expect(out).toContain('cautioned because some signals are mixed');
+    expect(out).toContain('held because the current signal is not strong enough');
+    expect(out).toContain('blocked because risk or confidence thresholds were missed');
+  });
 });

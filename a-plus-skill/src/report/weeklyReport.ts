@@ -21,6 +21,19 @@ function summarizeDecisionCounts(items: RecommendationResult[]): string {
   return `recommend=${counts.recommend} caution=${counts.caution} hold=${counts.hold} block=${counts.block}`;
 }
 
+function explainDecision(decision: RecommendationResult['decision']): string {
+  switch (decision) {
+    case 'recommend':
+      return 'recommended because the overall profile is strong';
+    case 'caution':
+      return 'cautioned because some signals are mixed';
+    case 'hold':
+      return 'held because the current signal is not strong enough';
+    case 'block':
+      return 'blocked because risk or confidence thresholds were missed';
+  }
+}
+
 export function renderWeeklyReport(items: RecommendationResult[], meta: CollectorMeta): string {
   const mode = meta.degraded ? 'fallback' : 'live';
   const fallbackReason = mode === 'fallback' ? meta.fallbackReason ?? 'UNKNOWN' : 'NONE';
@@ -31,8 +44,9 @@ export function renderWeeklyReport(items: RecommendationResult[], meta: Collecto
     .map((it, i) => {
       const outcome = it.installOutcome ? ` | outcome ${it.installOutcome.status}` : '';
       const action = it.installAction ? ` | action ${it.installAction}` : '';
+      const narrative = ` | ${explainDecision(it.decision)}`;
       const reasons = ` | why ${summarizeReasons(it.reasons)}`;
-      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}${reasons}`;
+      return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}${narrative}${reasons}`;
     })
     .join('\n');
 
