@@ -21,16 +21,28 @@ function summarizeDecisionCounts(items: RecommendationResult[]): string {
   return `recommend=${counts.recommend} caution=${counts.caution} hold=${counts.hold} block=${counts.block}`;
 }
 
-function explainDecision(decision: RecommendationResult['decision']): string {
-  switch (decision) {
+function explainDecision(item: RecommendationResult): string {
+  const ranked: Array<[string, number]> = [
+    ['fit', item.fitScore] as [string, number],
+    ['trend', item.trendScore] as [string, number],
+    ['stability', item.stabilityScore] as [string, number],
+    ['security', item.securityScore] as [string, number]
+  ].sort((a, b) => b[1] - a[1]);
+
+  const top = ranked[0]?.[0] ?? 'overall';
+  const second = ranked[1]?.[0] ?? 'overall';
+
+  switch (item.decision) {
     case 'recommend':
-      return 'recommended because the overall profile is strong';
+      return `recommended because ${top} and ${second} signals are both strong`;
     case 'caution':
-      return 'cautioned because some signals are mixed';
+      return `cautioned because ${top} is promising but ${second} still needs review`;
     case 'hold':
-      return 'held because the current signal is not strong enough';
+      return `held because ${top} is not strong enough to offset weaker signals`;
     case 'block':
-      return 'blocked because risk or confidence thresholds were missed';
+      return item.securityScore < 40
+        ? 'blocked primarily due to security risk'
+        : `blocked because ${top} and ${second} did not clear the required thresholds`;
   }
 }
 
@@ -90,7 +102,7 @@ export function renderWeeklyReport(items: RecommendationResult[], meta: Collecto
     .map((it, i) => {
       const outcome = it.installOutcome ? ` | outcome ${it.installOutcome.status}` : '';
       const action = it.installAction ? ` | action ${it.installAction}` : '';
-      const narrative = ` | ${explainDecision(it.decision)}`;
+      const narrative = ` | ${explainDecision(it)}`;
       const topSignals = ` | topSignals ${summarizeTopSignals(it)}`;
       const reasons = ` | why ${summarizeReasons(it.reasons)}`;
       return `${i + 1}. ${it.slug} | score ${it.finalScore.toFixed(1)} | security ${it.securityScore} | ${it.decision}${action}${outcome}${narrative}${topSignals}${reasons}`;
