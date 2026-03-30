@@ -304,9 +304,13 @@ npm run install:summary
 
 # 최근 6시간 설치 결과 요약
 npm run install:summary -- --hours 6
+
+# 자동화/후처리용 JSON 출력
+npm run install:summary -- --json
 ```
 - action/status/error/note 빈도를 집계합니다.
 - 최근 3개 install audit 이벤트를 함께 보여줍니다.
+- `--json`은 summary/counters/recent_events 구조로 출력됩니다.
 
 #### 운영 상태 점검 (`ops:status`)
 ```bash

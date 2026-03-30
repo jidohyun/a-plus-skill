@@ -66,4 +66,30 @@ describe('install summary script', () => {
     expect(stdout).toContain('recent events');
     expect(stdout).toContain('- none');
   });
+
+  it('supports json output for automation', async () => {
+    const workdir = await mkdtemp(resolve(tmpdir(), 'a-plus-install-summary-json-'));
+    tempDirs.push(workdir);
+
+    const dataDir = resolve(workdir, 'data');
+    await mkdir(dataDir, { recursive: true });
+    const logPath = resolve(dataDir, 'install-events.jsonl');
+    const now = new Date().toISOString();
+
+    await writeFile(
+      logPath,
+      `${JSON.stringify({ ts: now, slug: 'demo/json', action: 'auto-install', status: 'installed', degraded: false, notes: [] })}\n`,
+      'utf8'
+    );
+
+    const { stdout } = await execFileAsync('node', ['--import', tsxLoader, scriptPath, '--json'], {
+      cwd: workdir
+    });
+
+    const parsed = JSON.parse(stdout);
+    expect(parsed.summary.records).toBe(1);
+    expect(Array.isArray(parsed.counters.actions)).toBe(true);
+    expect(Array.isArray(parsed.recent_events)).toBe(true);
+    expect(parsed.recent_events[0].slug).toBe('demo/json');
+  });
 });

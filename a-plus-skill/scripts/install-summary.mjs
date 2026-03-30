@@ -2,19 +2,25 @@
 import { readFileSync } from 'node:fs';
 import { getInstallAuditPath } from '../src/install/auditIntegrity.ts';
 
+const jsonMode = process.argv.includes('--json');
+
 function increment(map, key) {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
+function counterRows(map, limit = 10) {
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([key, count]) => ({ key, count }));
+}
+
 function printCounter(title, map, limit = 10) {
   console.log(title);
-  if (map.size === 0) {
+  const rows = counterRows(map, limit);
+  if (rows.length === 0) {
     console.log('- none');
     return;
   }
-  const rows = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
-  for (const [key, count] of rows) {
-    console.log(`- ${key}: ${count}`);
+  for (const row of rows) {
+    console.log(`- ${row.key}: ${row.count}`);
   }
 }
 
@@ -28,9 +34,19 @@ try {
   content = readFileSync(auditPath, 'utf8');
 } catch (error) {
   if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-    console.log(`install_summary hours=${hours} path=${auditPath} records=0`);
-    console.log('recent events');
-    console.log('- none');
+    if (jsonMode) {
+      console.log(
+        JSON.stringify({
+          summary: { hours, path: auditPath, records: 0 },
+          counters: { actions: [], statuses: [], notes: [], errors: [] },
+          recent_events: []
+        })
+      );
+    } else {
+      console.log(`install_summary hours=${hours} path=${auditPath} records=0`);
+      console.log('recent events');
+      console.log('- none');
+    }
     process.exit(0);
   }
   throw error;
@@ -65,19 +81,44 @@ for (const event of records) {
   }
 }
 
-console.log(`install_summary hours=${hours} path=${auditPath} records=${records.length}`);
-printCounter('by action', actionCounts);
-printCounter('by status', statusCounts);
-printCounter('top notes', noteCounts, 8);
-printCounter('by error', errorCounts, 8);
-console.log('recent events');
-if (records.length === 0) {
-  console.log('- none');
+const recentEvents = records.slice(-3).reverse().map((event) => ({
+  ts: event.ts,
+  slug: event.slug,
+  action: event.action,
+  status: event.status,
+  degraded: event.degraded,
+  error: event.errorCode ?? 'none',
+  notes: Array.isArray(event.notes) && event.notes.length > 0 ? event.notes.slice(0, 2) : []
+}));
+
+if (jsonMode) {
+  console.log(
+    JSON.stringify({
+      summary: { hours, path: auditPath, records: records.length },
+      counters: {
+        actions: counterRows(actionCounts),
+        statuses: counterRows(statusCounts),
+        notes: counterRows(noteCounts, 8),
+        errors: counterRows(errorCounts, 8)
+      },
+      recent_events: recentEvents
+    })
+  );
 } else {
-  for (const event of records.slice(-3).reverse()) {
-    const noteSummary = Array.isArray(event.notes) && event.notes.length > 0 ? event.notes.slice(0, 2).join('; ') : 'none';
-    console.log(
-      `- ${event.ts} slug=${event.slug} action=${event.action} status=${event.status} degraded=${event.degraded} error=${event.errorCode ?? 'none'} notes=${JSON.stringify(noteSummary)}`
-    );
+  console.log(`install_summary hours=${hours} path=${auditPath} records=${records.length}`);
+  printCounter('by action', actionCounts);
+  printCounter('by status', statusCounts);
+  printCounter('top notes', noteCounts, 8);
+  printCounter('by error', errorCounts, 8);
+  console.log('recent events');
+  if (recentEvents.length === 0) {
+    console.log('- none');
+  } else {
+    for (const event of recentEvents) {
+      const noteSummary = event.notes.length > 0 ? event.notes.join('; ') : 'none';
+      console.log(
+        `- ${event.ts} slug=${event.slug} action=${event.action} status=${event.status} degraded=${event.degraded} error=${event.error} notes=${JSON.stringify(noteSummary)}`
+      );
+    }
   }
 }
