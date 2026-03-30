@@ -25,6 +25,7 @@
   - `collector-status` now exposes richer diagnostics (`degraded`, `skillCount`, `fetchTimeoutMs`)
 - Weekly report explainability improved:
   - header now exposes decision distribution summary
+  - header now includes a `takeaway` summary sentence
   - each item now includes natural-language decision narrative
   - each item now includes `topSignals` (top 2 scoring axes)
   - each item now includes concise `why` reason summary
