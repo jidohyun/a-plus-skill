@@ -66,13 +66,14 @@
 ### 2) Cross-link and maintenance docs polish (optional)
 - Link `docs/fsync-hardening-plan.md` from README or maintenance docs
 - Add short operator examples for explicit fast-cap reset vs preserve-for-investigation
+- Keep `docs/json-output-contracts.md` updated as JSON modes evolve
 
 ### 3) Choose next major product/feature track (recommended)
-The current hardening/ops-status/fast-cap track is in a strong state, collector robustness/visibility is in a much better place, and report/policy guidance has also advanced.
+The current hardening/ops-status/fast-cap track is in a strong state, collector/report/policy/operator UX have all advanced, and machine-readable outputs are now documented.
 Next work should likely move to one of these themes:
-- deeper policy/install refinement (e.g. more specific missing-condition notes for balanced block paths)
-- operator tooling / maintenance UX
-- delivery/collector status integration beyond current summaries
+- recommendation quality 2nd/3rd-pass empirical calibration
+- onboarding / end-to-end operator guide polish
+- install/audit summary interpretation polish
 
 ## Notes for next session
 - Keep policy semantics unchanged:

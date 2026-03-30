@@ -146,6 +146,14 @@ npm run typecheck
 npm run build
 ```
 
+## JSON 출력 계약
+운영/자동화용 JSON 출력 구조는 `docs/json-output-contracts.md`를 참고하세요.
+현재 문서화된 대상:
+- `maintenance:status --json`
+- `install:summary --json`
+- `scoring:calibration --json`
+- `collector:status --json`
+
 ## 추천 점수 보정 점검
 ```bash
 npm run scoring:calibration
