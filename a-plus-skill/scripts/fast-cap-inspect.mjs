@@ -39,9 +39,13 @@ function main() {
   let expectedChecksum = '';
   let parsed = false;
   let consistent = false;
+  let initialized = false;
   let reason = 'none';
 
-  if (!stateExists) {
+  if (!stateExists && !keyExists) {
+    reason = 'not_initialized';
+    consistent = true;
+  } else if (!stateExists) {
     if (keyExists) {
       reason = 'suspicious fast-cap reset: key exists while state missing';
     }
@@ -49,6 +53,7 @@ function main() {
     try {
       const obj = JSON.parse(stateRead.value);
       parsed = true;
+      initialized = true;
       schemaVersion = Number(obj?.schemaVersion);
       count = Number(obj?.count);
       updatedAt = String(obj?.updatedAt ?? '');
@@ -77,6 +82,7 @@ function main() {
     `state_exists=${stateExists}`,
     `key_exists=${keyExists}`,
     `state_parse_ok=${parsed}`,
+    `initialized=${initialized}`,
     `schema_version=${schemaVersion}`,
     `count=${count}`,
     `updated_at=${q(updatedAt || 'none')}`,

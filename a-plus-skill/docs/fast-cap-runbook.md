@@ -114,6 +114,8 @@ Why:
 When `fast_cap_tampered=true` appears:
 1. Run `npm run ops:status`
 2. Run `npm run fast-cap:inspect`
+   - `reason=not_initialized` + exit `0` means the pair was never created yet
+   - exit `2` means a real inconsistency or investigation target remains
 3. Inspect both files when needed:
    - `ls -l data/fast-audit-fail-cap*`
    - `cat data/fast-audit-fail-cap.json`
