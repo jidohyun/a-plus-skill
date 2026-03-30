@@ -59,10 +59,16 @@ function printCounter(title, map) {
 }
 
 function eventCategory(event) {
+  if (event === 'delivery_success') {
+    return 'success';
+  }
   if (event === 'lock_mismatch' || event === 'unsupported_mode') {
     return 'skip';
   }
-  return 'failure';
+  if (event === 'delivery_failed') {
+    return 'failure';
+  }
+  return 'unknown';
 }
 
 async function main() {
@@ -98,7 +104,9 @@ async function main() {
   console.log(`Delivery failures summary (last ${hours}h)`);
   console.log(`- records: ${records.length}`);
   console.log(`- failures: ${categoryCounts.get('failure') ?? 0}`);
+  console.log(`- successes: ${categoryCounts.get('success') ?? 0}`);
   console.log(`- skips: ${categoryCounts.get('skip') ?? 0}`);
+  console.log(`- unknown: ${categoryCounts.get('unknown') ?? 0}`);
   printCounter('by category', categoryCounts);
   printCounter('by event', eventCounts);
   printCounter('by code', codeCounts);

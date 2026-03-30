@@ -127,7 +127,7 @@ function getDeliveryLogPaths(basePath) {
   }
 
   return names
-    .filter((name) => name === baseName || name.startsWith(`${baseName}.`))
+    .filter((name) => name === baseName || (name.startsWith(`${baseName}.`) && !name.endsWith('.gz')))
     .map((name) => resolve(dir, name))
     .sort((a, b) => a.localeCompare(b));
 }

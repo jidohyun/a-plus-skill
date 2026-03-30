@@ -233,6 +233,25 @@ describe('ops-status script', () => {
     }
   });
 
+  it('ignores gzip rotated delivery logs when assessing health', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-gzip-'));
+    try {
+      writeDeliveryLog(dir, [
+        `${isoSecondsAgo(30)} event=delivery_success mode=discord-dm chunk=1/1 attempt=1/3`
+      ]);
+      writeDeliveryLogRotated(dir, '2.gz', ['this is not plain text log content']);
+
+      const result = runStatus([], { INSTALL_POLICY: 'balanced', REPORT_DELIVERY: 'discord-dm' }, dir);
+      expect(result.status).toBe(0);
+      const out = parseLine(result.stdout);
+      expect(out.delivery_health).toBe('healthy');
+      expect(out.delivery_successes).toBe('1');
+      expect(out.overall).toBe('healthy');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('delivery failures without success => strict unhealthy', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ops-status-delivery-strict-fail-only-'));
     try {

@@ -43,8 +43,45 @@ describe('delivery failure summary script', () => {
     expect(stdout).toContain('- records: 3');
     expect(stdout).toContain('- failures: 1');
     expect(stdout).toContain('- skips: 2');
+    expect(stdout).toContain('- successes: 0');
+    expect(stdout).toContain('- unknown: 0');
     expect(stdout).toContain('by category');
     expect(stdout).toContain('- skip: 2');
     expect(stdout).toContain('- failure: 1');
+  });
+
+  it('counts delivery_success as success and unknown events separately', async () => {
+    const workdir = await mkdtemp(resolve(tmpdir(), 'a-plus-summary-events-'));
+    tempDirs.push(workdir);
+
+    const dataDir = resolve(workdir, 'data');
+    await mkdir(dataDir, { recursive: true });
+
+    const logPath = resolve(dataDir, 'report-delivery.log');
+
+    const now = new Date().toISOString();
+    const fixture = [
+      `${now} event=delivery_success mode=discord-dm status=200`,
+      `${now} event=delivery_failed mode=discord-dm code=NETWORK_ERROR status=503`,
+      `${now} event=weird_future_event mode=discord-dm`
+    ].join('\n');
+
+    await writeFile(logPath, `${fixture}\n`, 'utf8');
+
+    const { stdout } = await execFileAsync('node', [scriptPath, '--hours', '1'], {
+      cwd: workdir
+    });
+
+    expect(stdout).toContain('- records: 3');
+    expect(stdout).toContain('- failures: 1');
+    expect(stdout).toContain('- successes: 1');
+    expect(stdout).toContain('- unknown: 1');
+    expect(stdout).toContain('by category');
+    expect(stdout).toContain('- success: 1');
+    expect(stdout).toContain('- failure: 1');
+    expect(stdout).toContain('- unknown: 1');
+    expect(stdout).toContain('by event');
+    expect(stdout).toContain('- delivery_success: 1');
+    expect(stdout).toContain('- weird_future_event: 1');
   });
 });
