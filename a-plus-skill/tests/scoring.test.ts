@@ -113,6 +113,12 @@ describe('scoring', () => {
     expect(result).toBeLessThanOrEqual(100);
   });
 
+  it('slightly favors fit/stability over raw trend/security when scores are close', () => {
+    const activeFit = calculateFinalScore({ fit: 82, trend: 63, stability: 74, security: 68 });
+    const hypeOnly = calculateFinalScore({ fit: 68, trend: 80, stability: 55, security: 72 });
+    expect(activeFit).toBeGreaterThan(hypeOnly);
+  });
+
   it('applies rounding to 6 decimals for stability score', () => {
     const skill = makeSkill({
       versions: 7,

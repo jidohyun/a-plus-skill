@@ -62,5 +62,5 @@ export function calculateFinalScore(input: {
   security: number;
 }) {
   const { fit, trend, stability, security } = input;
-  return clampScore(0.35 * fit + 0.2 * trend + 0.15 * stability + 0.3 * security);
+  return clampScore(0.38 * fit + 0.17 * trend + 0.18 * stability + 0.27 * security);
 }
