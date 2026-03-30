@@ -242,6 +242,13 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
       return fallbackResult(reason);
     }
 
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+    if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
+      const reason = 'UNEXPECTED_CONTENT_TYPE';
+      console.warn(`[collector] ClawHub returned unexpected content-type: ${contentType}`);
+      return fallbackResult(reason);
+    }
+
     const html = await response.text();
     const parsed = parseSkillsFromHtml(html);
 

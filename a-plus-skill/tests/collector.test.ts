@@ -139,6 +139,16 @@ describe('collector', () => {
     expect(fallbackResult.meta.fallbackReason).toContain('PARSE_BELOW_THRESHOLD_1');
   });
 
+  it('falls back when ClawHub returns unexpected content-type', async () => {
+    const jsonFetch: typeof fetch = async () =>
+      new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+
+    const result = await fetchCandidateSkills(jsonFetch);
+    expect(result.meta.source).toBe('fallback');
+    expect(result.meta.degraded).toBe(true);
+    expect(result.meta.fallbackReason).toBe('UNEXPECTED_CONTENT_TYPE');
+  });
+
   it('falls back to default MIN_PARSED_SKILLS for invalid env values', async () => {
     const twoSkillsHtml = `
       <html><body><script>{"skills":[
