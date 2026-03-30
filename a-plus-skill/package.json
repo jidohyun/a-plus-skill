@@ -16,6 +16,7 @@
     "ops:status": "node --import tsx scripts/ops-status.mjs",
     "ops:status:gate": "npm run ops:status -- --strict=nonhealthy",
     "fast-cap:inspect": "node scripts/fast-cap-inspect.mjs",
+    "maintenance:status": "node scripts/maintenance-status.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

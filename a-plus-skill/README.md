@@ -242,6 +242,9 @@ INSTALL_AUDIT_LOG_PATH=./data/install-events.jsonl npm run audit:verify
 # 운영 상태 단일 라인 점검 (key=value)
 npm run ops:status
 
+# 유지보수용 묶음 점검(ops gate + collector + fast-cap + delivery summary)
+npm run maintenance:status
+
 # fast-cap state/key 일관성 원인 점검
 # - 정상 일관성 또는 미초기화(not_initialized): exit 0
 # - 비정상/조사 필요: exit 2
