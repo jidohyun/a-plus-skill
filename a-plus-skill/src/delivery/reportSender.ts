@@ -136,13 +136,16 @@ function isInlineRotateEnabled(): boolean {
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 
-async function logFailure(message: string): Promise<void> {
+async function logFailure(message: string, meta?: CollectorMeta): Promise<void> {
   try {
     await mkdir(dirname(DELIVERY_LOG_PATH), { recursive: true });
     if (isInlineRotateEnabled()) {
       await rotateDeliveryLogIfNeeded(getDeliveryLogMaxBytes());
     }
-    await appendFile(DELIVERY_LOG_PATH, `${new Date().toISOString()} ${message}\n`, 'utf8');
+    const metaSuffix = meta
+      ? ` collector_source=${meta.source} collector_degraded=${meta.degraded} collector_reason=${(meta.fallbackReason ?? 'NONE').replace(/[^A-Z0-9_\-]/gi, '_')}`
+      : '';
+    await appendFile(DELIVERY_LOG_PATH, `${new Date().toISOString()} ${message}${metaSuffix}\n`, 'utf8');
   } catch {
     // do not fail delivery flow due to logging failure
   }
@@ -221,13 +224,14 @@ export async function sendWeeklyReport(
     if (lockMismatch) {
       const reason = 'lock_mismatch';
       await logFailure(
-        `event=lock_mismatch expected=${sanitizeMode(expectedMode ?? 'unknown')} actual=${sanitizeMode(rawMode)}`
+        `event=lock_mismatch expected=${sanitizeMode(expectedMode ?? 'unknown')} actual=${sanitizeMode(rawMode)}`,
+        meta
       );
       return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
     }
 
     const reason = 'unsupported REPORT_DELIVERY mode';
-    await logFailure(`event=unsupported_mode mode=${sanitizeMode(rawMode)}`);
+    await logFailure(`event=unsupported_mode mode=${sanitizeMode(rawMode)}`, meta);
     return { skipped: true, mode: 'none', reason, chunksAttempted: 0, chunksSent: 0 };
   }
 
@@ -249,7 +253,8 @@ export async function sendWeeklyReport(
       try {
         await sender(chunk);
         await logFailure(
-          `event=delivery_success mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS}`
+          `event=delivery_success mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS}`,
+          meta
         );
         chunksSent += 1;
         sent = true;
@@ -261,7 +266,8 @@ export async function sendWeeklyReport(
         await logFailure(
           `event=delivery_failed mode=${mode} chunk=${idx + 1}/${chunks.length} attempt=${attempt}/${MAX_ATTEMPTS} code=${safeCode}${
             info.status ? ` status=${info.status}` : ''
-          }${info.retryAfterMs ? ` retry_after_ms=${info.retryAfterMs}` : ''}`
+          }${info.retryAfterMs ? ` retry_after_ms=${info.retryAfterMs}` : ''}`,
+          meta
         );
 
         if (attempt < MAX_ATTEMPTS && isRetryable(info)) {

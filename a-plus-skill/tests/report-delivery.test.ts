@@ -311,4 +311,24 @@ describe('report delivery', () => {
     expect(current).toContain('event=unsupported_mode');
     expect(current.length).toBeGreaterThan(0);
   });
+
+  it('writes collector meta context into delivery log entries', async () => {
+    vi.stubEnv('REPORT_DELIVERY', 'discord-dm');
+
+    await sendWeeklyReport('short-report', {
+      source: 'fallback',
+      degraded: true,
+      fallbackReason: 'FETCH_ERROR_TIMEOUT',
+      fetchedAt: '2026-03-30T00:00:00.000Z'
+    }, {
+      sender: async () => {},
+      sleepFn: async () => {}
+    });
+
+    const current = await readFile(deliveryLogPath, 'utf8');
+    expect(current).toContain('event=delivery_success');
+    expect(current).toContain('collector_source=fallback');
+    expect(current).toContain('collector_degraded=true');
+    expect(current).toContain('collector_reason=FETCH_ERROR_TIMEOUT');
+  });
 });
