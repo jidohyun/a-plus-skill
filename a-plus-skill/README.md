@@ -149,6 +149,9 @@ npm run build
 ## 추천 점수 보정 점검
 ```bash
 npm run scoring:calibration
+
+# 자동화/후처리용 JSON 출력
+npm run scoring:calibration -- --json
 ```
 - 현재 collector 결과를 기준으로 fit/trend/stability/security/final 분포를 보여줍니다.
 - `decision_counts`를 함께 출력해 recommend/caution/hold/block 쏠림을 빠르게 확인할 수 있습니다.

@@ -30,4 +30,20 @@ describe('scoring calibration script', () => {
     expect(result.stdout).toContain('- hold:');
     expect(result.stdout).toContain('- block:');
   });
+
+  it('supports json output for automation', () => {
+    const result = spawnSync('node', ['--import', TSX_LOADER, SCRIPT_PATH, '--json'], {
+      cwd: REPO_ROOT,
+      env: { ...process.env },
+      encoding: 'utf8'
+    });
+
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.summary).toBeTruthy();
+    expect(parsed.distributions.fit).toBeTruthy();
+    expect(parsed.distributions.trend).toBeTruthy();
+    expect(parsed.decision_counts).toBeTruthy();
+    expect(typeof parsed.decision_counts.recommend).toBe('number');
+  });
 });
