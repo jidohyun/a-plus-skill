@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MIN_PARSED_SKILLS,
+  MAX_CLAWHUB_HTML_BYTES,
   MAX_MIN_PARSED_SKILLS,
   fetchCandidateSkills,
   MOCK_SKILLS,
@@ -147,6 +148,36 @@ describe('collector', () => {
     expect(result.meta.source).toBe('fallback');
     expect(result.meta.degraded).toBe(true);
     expect(result.meta.fallbackReason).toBe('UNEXPECTED_CONTENT_TYPE');
+  });
+
+  it('falls back when content-length exceeds collector HTML limit', async () => {
+    const largeFetch: typeof fetch = async () =>
+      new Response('<html></html>', {
+        status: 200,
+        headers: {
+          'content-type': 'text/html',
+          'content-length': String(MAX_CLAWHUB_HTML_BYTES + 1)
+        }
+      });
+
+    const result = await fetchCandidateSkills(largeFetch);
+    expect(result.meta.source).toBe('fallback');
+    expect(result.meta.degraded).toBe(true);
+    expect(result.meta.fallbackReason).toBe('HTML_TOO_LARGE');
+  });
+
+  it('falls back when HTML body exceeds collector limit after read', async () => {
+    const hugeHtml = 'x'.repeat(MAX_CLAWHUB_HTML_BYTES + 1);
+    const largeBodyFetch: typeof fetch = async () =>
+      new Response(hugeHtml, {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      });
+
+    const result = await fetchCandidateSkills(largeBodyFetch);
+    expect(result.meta.source).toBe('fallback');
+    expect(result.meta.degraded).toBe(true);
+    expect(result.meta.fallbackReason).toBe('HTML_TOO_LARGE');
   });
 
   it('falls back to default MIN_PARSED_SKILLS for invalid env values', async () => {

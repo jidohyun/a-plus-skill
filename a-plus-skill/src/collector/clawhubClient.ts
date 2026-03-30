@@ -4,6 +4,7 @@ const DEFAULT_CLAWHUB_SKILLS_URL = 'https://clawhub.ai/skills?nonSuspicious=true
 const ALLOWED_HOSTS = new Set(['clawhub.ai', 'www.clawhub.ai', 'clawhub.org', 'www.clawhub.org']);
 export const DEFAULT_MIN_PARSED_SKILLS = 3;
 export const MAX_MIN_PARSED_SKILLS = 50;
+export const MAX_CLAWHUB_HTML_BYTES = 2 * 1024 * 1024;
 
 type FetchLike = typeof fetch;
 
@@ -249,7 +250,21 @@ export async function fetchCandidateSkills(fetcher: FetchLike = fetch): Promise<
       return fallbackResult(reason);
     }
 
+    const contentLengthRaw = response.headers.get('content-length')?.trim() ?? '';
+    if (/^[0-9]+$/.test(contentLengthRaw)) {
+      const contentLength = Number.parseInt(contentLengthRaw, 10);
+      if (Number.isFinite(contentLength) && contentLength > MAX_CLAWHUB_HTML_BYTES) {
+        console.warn(`[collector] ClawHub response too large: ${contentLength} bytes (limit=${MAX_CLAWHUB_HTML_BYTES})`);
+        return fallbackResult('HTML_TOO_LARGE');
+      }
+    }
+
     const html = await response.text();
+    if (Buffer.byteLength(html, 'utf8') > MAX_CLAWHUB_HTML_BYTES) {
+      console.warn(`[collector] ClawHub HTML body exceeded limit after read (limit=${MAX_CLAWHUB_HTML_BYTES})`);
+      return fallbackResult('HTML_TOO_LARGE');
+    }
+
     const parsed = parseSkillsFromHtml(html);
 
     if (parsed.length < minParsedSkills) {
