@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -153,6 +153,7 @@ type StrictEvidenceFailStateReadResult = {
 
 function withFileLock<T>(lockPath: string, fn: () => T): T {
   const deadline = Date.now() + FAST_AUDIT_FAIL_CAP_LOCK_TIMEOUT_MS;
+  const staleLockMs = FAST_AUDIT_FAIL_CAP_LOCK_TIMEOUT_MS;
 
   while (Date.now() <= deadline) {
     try {
@@ -175,6 +176,21 @@ function withFileLock<T>(lockPath: string, fn: () => T): T {
       const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : undefined;
       if (code !== 'EEXIST') {
         throw error;
+      }
+
+      try {
+        const stat = statSync(lockPath);
+        const ageMs = Math.max(0, Date.now() - stat.mtimeMs);
+        if (Number.isFinite(stat.mtimeMs) && ageMs > staleLockMs) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch (statError) {
+        const statCode =
+          statError && typeof statError === 'object' && 'code' in statError ? String((statError as { code?: string }).code) : undefined;
+        if (statCode === 'ENOENT') {
+          continue;
+        }
       }
     }
   }

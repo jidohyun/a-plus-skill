@@ -793,6 +793,7 @@ describe('install flow', () => {
     }));
 
     expect(outcome.status).toBe('installed');
+    expect(existsSync(lockPath)).toBe(false);
 
     const lines = readFileSync(logPath, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(1);
