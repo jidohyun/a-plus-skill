@@ -144,6 +144,10 @@ npm run collector:status -- --strict
   - `strict`: hold는 **유효한 override token** + `INSTALL_OVERRIDE_REASON` + `INSTALL_CONFIRM=true` 필요, block은 우회 불가
   - `balanced`: hold는 valid token+reason+confirm 필요, block은 valid token 2개(`INSTALL_OVERRIDE_TOKEN`, `INSTALL_OVERRIDE_STRONG_TOKEN`) + reason + confirm 필요
   - `fast`: hold/block 모두 valid token + reason + confirm 필요
+- note 가이던스(설치가 왜 막혔는지 설명):
+  - confirmation만 빠졌으면 `... override pending: confirmation missing`
+  - reason이 비었거나 너무 짧으면 `... override pending: reason missing or too short`
+  - nonce 재사용이면 `... rejected: nonce replay ...`
 - 토폴로지 가드레일:
   - `INSTALL_TOPOLOGY` 지원값: `local-dev | single-instance | multi-instance` (기본 `single-instance`)
   - `INSTALL_TOPOLOGY=multi-instance`에서는 startup 시 보안 posture를 강제 검증(fail-fast)
