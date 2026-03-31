@@ -23,90 +23,39 @@ function run(label, command, args) {
   }
 }
 
-const checks = [
-  run('ops_status_gate', 'npm', ['run', 'ops:status:gate', '--silent']),
-  run('collector_status', nodeBin, ['--import', tsxLoader, 'scripts/collector-status.mjs']),
-  run('fast_cap_inspect', 'npm', ['run', 'fast-cap:inspect', '--silent']),
-  run('delivery_failures', 'npm', ['run', 'delivery:failures', '--silent', '--', '--hours', '24'])
-];
-
-const opsGate = checks.find((check) => check.label === 'ops_status_gate');
-const collector = checks.find((check) => check.label === 'collector_status');
-const fastCap = checks.find((check) => check.label === 'fast_cap_inspect');
-const delivery = checks.find((check) => check.label === 'delivery_failures');
-const collectorModeMatch = collector?.stdout.match(/\bmode=([^\s]+)/);
-const fastCapReasonMatch = fastCap?.stdout.match(/\breason=("(?:\\.|[^"])*"|[^\s]+)/);
-const deliveryFailuresMatch = delivery?.stdout.match(/- failures: (\d+)/);
+const opsGate = run('ops_status_gate', 'npm', ['run', 'ops:status:gate', '--silent']);
+const collector = run('collector_status', nodeBin, ['--import', tsxLoader, 'scripts/collector-status.mjs']);
+const fastCap = run('fast_cap_inspect', 'npm', ['run', 'fast-cap:inspect', '--silent']);
+const delivery = run('delivery_failures', 'npm', ['run', 'delivery:failures', '--silent', '--', '--hours', '24']);
+const collectorModeMatch = collector.stdout.match(/\bmode=([^\s]+)/);
+const fastCapReasonMatch = fastCap.stdout.match(/\breason=("(?:\\.|[^"])*"|[^\s]+)/);
+const deliveryFailuresMatch = delivery.stdout.match(/- failures: (\d+)/);
 const collectorMode = collectorModeMatch?.[1] ?? 'unknown';
 const fastCapReason = fastCapReasonMatch?.[1] ?? 'unknown';
 const deliveryFailures = Number.parseInt(deliveryFailuresMatch?.[1] ?? '-1', 10);
 
-const hasOpsGateFailure = (opsGate?.code ?? 1) !== 0;
-const hasFastCapAttention = fastCapReason !== '"not_initialized"' && fastCapReason !== '"none"' && fastCapReason !== 'none';
-const hasCollectorFallback = collectorMode === 'fallback';
-const hasDeliveryFailures = Number.isFinite(deliveryFailures) && deliveryFailures > 0;
-const issueCount = [hasOpsGateFailure, hasFastCapAttention, hasCollectorFallback, hasDeliveryFailures].filter(Boolean).length;
-
-let overall = 'healthy';
-let primaryIssue = 'none';
-let recommendedAction = 'none';
-let severity = 'info';
-
-if (hasOpsGateFailure) {
-  overall = 'nonhealthy';
-  primaryIssue = 'ops_gate_fail';
-  recommendedAction = 'run npm run ops:status and inspect critical_flags';
-  severity = 'critical';
-} else if (hasFastCapAttention) {
-  overall = 'degraded';
-  primaryIssue = 'fast_cap_attention';
-  recommendedAction = 'run npm run fast-cap:inspect and follow fast-cap runbook';
-  severity = 'high';
-} else if (hasCollectorFallback) {
-  overall = 'degraded';
-  primaryIssue = 'collector_fallback';
-  recommendedAction = 'inspect collector_status reason and upstream ClawHub reachability';
-  severity = 'medium';
-} else if (hasDeliveryFailures) {
-  overall = 'degraded';
-  primaryIssue = 'delivery_failures';
-  recommendedAction = 'run npm run delivery:failures -- --hours 24';
-  severity = 'medium';
-}
-
-const hasHardFailure = checks.some((check) => check.label === 'ops_status_gate' && check.code !== 0);
-const summary = {
-  overall,
-  severity,
-  issue_count: issueCount,
-  ops_gate_code: opsGate?.code ?? 'unknown',
-  collector_mode: collectorMode,
-  fast_cap_reason: fastCapReason,
-  delivery_failures: Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown',
-  primary_issue: primaryIssue,
-  recommended_action: recommendedAction
-};
+const { getMaintenanceStatus } = await import('../src/application/status/getMaintenanceStatus.ts');
+const status = getMaintenanceStatus({
+  opsGate: { code: opsGate.code, stdout: opsGate.stdout, stderr: opsGate.stderr },
+  collectorStatus: { mode: collectorMode, stdout: collector.stdout, stderr: collector.stderr },
+  fastCapInspect: { reason: fastCapReason, stdout: fastCap.stdout, stderr: fastCap.stderr },
+  deliveryFailures: {
+    failures: Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown',
+    stdout: delivery.stdout,
+    stderr: delivery.stderr
+  }
+});
 
 if (jsonMode) {
-  console.log(
-    JSON.stringify({
-      summary,
-      checks: checks.map((check) => ({
-        label: check.label,
-        ok: check.ok,
-        code: check.code,
-        stdout: check.stdout,
-        stderr: check.stderr ?? ''
-      }))
-    })
-  );
+  console.log(JSON.stringify(status));
 } else {
+  const summary = status.summary;
   console.log(
-    `maintenance_status overall=${overall} severity=${severity} issue_count=${issueCount} ops_gate_code=${opsGate?.code ?? 'unknown'} collector_mode=${collectorMode} fast_cap_reason=${fastCapReason} delivery_failures=${Number.isFinite(deliveryFailures) ? deliveryFailures : 'unknown'} primary_issue=${JSON.stringify(primaryIssue)} recommended_action=${JSON.stringify(recommendedAction)}`
+    `maintenance_status overall=${summary.overall} severity=${summary.severity} issue_count=${summary.issue_count} ops_gate_code=${summary.ops_gate_code} collector_mode=${summary.collector_mode} fast_cap_reason=${summary.fast_cap_reason} delivery_failures=${summary.delivery_failures} primary_issue=${JSON.stringify(summary.primary_issue)} recommended_action=${JSON.stringify(summary.recommended_action)}`
   );
   console.log('');
 
-  for (const check of checks) {
+  for (const check of status.checks) {
     const body = check.stdout || check.stderr || '(no output)';
     console.log(`[${check.label}] ok=${check.ok} code=${check.code}`);
     console.log(body);
@@ -114,4 +63,4 @@ if (jsonMode) {
   }
 }
 
-process.exit(hasHardFailure ? 2 : 0);
+process.exit(opsGate.code !== 0 ? 2 : 0);

@@ -1,0 +1,15 @@
+{
+  "id": "a-plus-skill",
+  "name": "A+ Skill",
+  "description": "Operational status, recommendation reporting, and audit summary tools for a-plus-skill",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "readOnly": {
+        "type": "boolean",
+        "description": "Reserved flag for future plugin-side safety defaults. Phase 1 tools are read-mostly regardless of this value."
+      }
+    }
+  }
+}

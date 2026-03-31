@@ -132,6 +132,59 @@ These outputs are intended for automation, cron, wrappers, and downstream toolin
 - `reason=NONE` is only expected in live mode.
 - Snake-case aliases are included to make downstream JSON consumers easier to standardize.
 
+## 5) OpenClaw plugin tools (phase 1)
+
+Implementation location (current plan):
+- `packages/openclaw-plugin-aplus/`
+
+
+### `aplus_status`
+Returns the same logical payload as the maintenance status JSON contract:
+
+```json
+{
+  "summary": {
+    "overall": "healthy|degraded|nonhealthy",
+    "severity": "info|medium|high|critical",
+    "issue_count": 0,
+    "ops_gate_code": 0,
+    "collector_mode": "live|fallback|unknown",
+    "fast_cap_reason": "none|not_initialized|...",
+    "delivery_failures": 0,
+    "primary_issue": "none|ops_gate_fail|fast_cap_attention|collector_fallback|delivery_failures",
+    "recommended_action": "..."
+  },
+  "checks": []
+}
+```
+
+### `aplus_install_summary`
+Returns the same payload shape as `install:summary --json`.
+
+### `aplus_scoring_calibration`
+Returns the same payload shape as `scoring:calibration --json`.
+
+### `aplus_recommend_report`
+Returns a read-only recommendation/report payload:
+
+```json
+{
+  "policy": "strict|balanced|fast",
+  "profileType": "developer|automation|assistant",
+  "source": "live|fallback",
+  "degraded": false,
+  "fallbackReason": "NONE|...",
+  "fetchedAt": "2026-03-30T00:00:00.000Z",
+  "results": [],
+  "report": "..."
+}
+```
+
+### Notes
+- Phase 1 plugin tools are intentionally read-mostly.
+- `aplus_recommend_report` does **not** perform install or delivery side effects.
+- Plugin tool payloads should evolve additively; consumers should ignore unknown fields.
+
 ## Consumer guidance
 - Prefer checking process exit code first for gate semantics.
 - Use JSON fields for dashboards, automations, and downstream heuristics.

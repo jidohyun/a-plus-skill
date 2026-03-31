@@ -71,10 +71,17 @@
 
 ### 3) Choose next major product/feature track (recommended)
 The current hardening/ops-status/fast-cap track is in a strong state, collector/report/policy/operator UX have all advanced, and machine-readable outputs are now documented.
+A new phase-1 OpenClaw plugin wrapper now also exists at `packages/openclaw-plugin-aplus/` and currently exposes read-mostly tools:
+- `aplus_status`
+- `aplus_install_summary`
+- `aplus_scoring_calibration`
+- `aplus_recommend_report`
+
 Next work should likely move to one of these themes:
 - recommendation quality 2nd/3rd-pass empirical calibration
-- onboarding / end-to-end operator guide polish
+- onboarding / end-to-end operator guide polish (including plugin install/use docs)
 - install/audit summary interpretation polish
+- plugin phase 2 planning (`aplus_audit_verify`, config resolver, text/json output mode split)
 
 ## Notes for next session
 - Keep policy semantics unchanged:

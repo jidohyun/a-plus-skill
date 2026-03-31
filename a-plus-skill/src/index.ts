@@ -3,24 +3,9 @@ import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unl
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { fetchCandidateSkills } from './collector/clawhubClient.js';
-import { loadInstallPolicyContextFromEnv, loadInstallTopologyFromEnv, loadPolicyFromEnv } from './install/confirm.js';
-import { runInstall } from './install/openclawInstaller.js';
-import { getInstallAuditPath, verifyInstallAuditFile } from './install/auditIntegrity.js';
+import { getInstallAuditPath } from './install/auditIntegrity.js';
 import type { InstallAuditVerifyResult } from './install/auditIntegrity.js';
-import { decide, planInstallAction } from './policy/policyEngine.js';
-import { validateOverrideSecurityPosture } from './policy/overrideNonceStore.js';
-import { buildReasons } from './recommender/explain.js';
-import {
-  calculateFinalScore,
-  calculateFitScore,
-  calculateStabilityScore,
-  calculateTrendScore
-} from './recommender/scoring.js';
-import { renderWeeklyReport } from './report/weeklyReport.js';
-import { sendWeeklyReport } from './delivery/reportSender.js';
-import { securityScore } from './security/riskScoring.js';
-import type { InstallOutcome, InstallPlan, Policy, ProfileConfig, RecommendationResult } from './types/index.js';
+import type { InstallOutcome, InstallPlan, Policy, ProfileConfig } from './types/index.js';
 import { getSafeDefaultProfile, normalizeRegistry, resolveProfile } from './profile/normalize.js';
 import { appendEvidenceLine } from './install/appendEvidence.js';
 
@@ -571,88 +556,12 @@ export function enforceAuditIntegrityPolicy(policy: Policy, auditIntegrity: Inst
 }
 
 export async function main() {
-  const profile = await loadProfile();
-  const { skills, meta } = await fetchCandidateSkills();
-  const policy = loadPolicyFromEnv('balanced');
-  const topology = loadInstallTopologyFromEnv('single-instance');
-  validateOverrideSecurityPosture({ topology, policy });
+  const { runRecommendationBatch } = await import('./application/recommend/runRecommendationBatch.js');
+  const batch = await runRecommendationBatch({ install: true, deliver: true });
+  console.log(batch.report);
 
-  const installContext = loadInstallPolicyContextFromEnv();
-  const auditPath = getInstallAuditPath();
-  const auditIntegrity = verifyInstallAuditFile(auditPath);
-  enforceAuditIntegrityPolicy(policy, auditIntegrity, auditPath);
-
-  const results: RecommendationResult[] = [];
-  const fastAuditFailMaxInstalls = parseFastAuditFailMaxInstalls();
-
-  for (let i = 0; i < skills.length; i += 1) {
-    const s = skills[i]!;
-    const fitScore = calculateFitScore(s, profile);
-    const trendScore = calculateTrendScore(s);
-    const stabilityScore = calculateStabilityScore(s);
-    const security = securityScore(s);
-    const finalScore = calculateFinalScore({
-      fit: fitScore,
-      trend: trendScore,
-      stability: stabilityScore,
-      security
-    });
-
-    const policyDecision = decide(policy, finalScore, security);
-    const installPlanBase = planInstallAction(policy, policyDecision, {
-      ...installContext,
-      degraded: meta.degraded
-    });
-
-    const installPlanWithGate = applyAuditIntegrityGate(policy, installPlanBase, auditIntegrity);
-    const fastCap = consumeFastAuditFailInstallCap(policy, installPlanWithGate, auditIntegrity, fastAuditFailMaxInstalls);
-    const installPlan = fastCap.plan;
-
-    if (policy === 'fast' && fastCap.demotedByCap) {
-      appendInstallOpsEvent({
-        policy,
-        reason: 'fast audit failure cap exceeded',
-        line: auditIntegrity.line,
-        action: 'demote',
-        auditPath,
-        notes: [`count=${fastCap.count}`, `cap=${fastCap.cap}`, `slug=${s.slug}`]
-      });
-    }
-
-    const reasons = buildReasons({ fitScore, trendScore, securityScore: security });
-    if (meta.degraded) {
-      reasons.push('실데이터 수집 저하 상태: fallback 모드');
-    }
-    reasons.push(...installPlan.notes);
-
-    const installOutcome = await runInstall(s.slug, installPlan, undefined, {
-      topology,
-      degraded: meta.degraded
-    });
-
-    results.push({
-      slug: s.slug,
-      fitScore,
-      trendScore,
-      stabilityScore,
-      securityScore: Math.round(security),
-      finalScore,
-      decision: installPlan.effectiveDecision,
-      reasons,
-      installAction: installPlan.action,
-      installOutcome
-    });
-
-    if (i < skills.length - 1) {
-      await waitForInstallTimeoutRecovery(installOutcome);
-    }
-  }
-
-  const report = renderWeeklyReport(results, meta);
-  console.log(report);
-
-  const delivery = await sendWeeklyReport(report, meta);
-  if (!delivery.skipped && !delivery.success) {
+  const delivery = batch.delivery;
+  if (delivery && !delivery.skipped && !delivery.success) {
     console.error(`[delivery] report send failed: ${delivery.reason ?? 'unknown'}`);
     const failHard = (process.env.REPORT_DELIVERY_FAIL_HARD ?? 'true').trim().toLowerCase();
     if (failHard === 'true' || failHard === '1' || failHard === 'yes') {

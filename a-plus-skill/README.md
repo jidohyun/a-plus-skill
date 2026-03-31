@@ -153,6 +153,44 @@ npm run build
 - `install:summary --json`
 - `scoring:calibration --json`
 - `collector:status --json`
+- OpenClaw plugin tools (`aplus_status`, `aplus_install_summary`, `aplus_scoring_calibration`, `aplus_recommend_report`)
+
+## OpenClaw plugin (phase 1)
+현재 `a-plus-skill`은 별도 plugin package로도 사용할 수 있습니다.
+
+위치:
+- `packages/openclaw-plugin-aplus/`
+
+초기 제공 tool:
+- `aplus_status`
+- `aplus_install_summary`
+- `aplus_scoring_calibration`
+- `aplus_recommend_report`
+
+특징:
+- 모두 **read-mostly** tool입니다.
+- `aplus_recommend_report`는 install / delivery side effect 없이 read-only recommendation report만 생성합니다.
+- install execute / delivery send / override 관련 tool은 아직 plugin scope에 포함되지 않습니다.
+
+설치 절차:
+```bash
+# 1) root core build
+npm run build
+
+# 2) plugin package dependency install
+cd packages/openclaw-plugin-aplus
+npm install
+
+# 3) OpenClaw에 local link install
+openclaw plugins install -l .
+
+# 4) 등록 확인
+openclaw plugins inspect a-plus-skill --json
+```
+
+주의:
+- plugin package는 root build 산출물 `dist/src/`를 재사용합니다.
+- 따라서 plugin load 전에는 항상 root에서 `npm run build`가 선행되어야 합니다.
 
 ## 추천 점수 보정 점검
 ```bash
