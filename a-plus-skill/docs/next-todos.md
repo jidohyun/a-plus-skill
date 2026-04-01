@@ -82,6 +82,7 @@ Next work should likely move to one of these themes:
 - onboarding / end-to-end operator guide polish (including plugin install/use docs)
 - install/audit summary interpretation polish
 - plugin phase 2 planning (`aplus_audit_verify`, config resolver, text/json output mode split)
+- plugin install execution safety design (`docs/plugin-install-execute-safety-design.md`)
 
 ## Notes for next session
 - Keep policy semantics unchanged:

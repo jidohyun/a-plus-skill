@@ -319,7 +319,7 @@ Definition of done:
 
 ## Phase 5 — side-effect tool evaluation (later)
 Possible future tools:
-- install planning tool
+- install planning tool (now implemented as read-only/planning-only)
 - install execute tool
 - report delivery tool
 
@@ -328,6 +328,7 @@ Prerequisites before any of those:
 - install self-call behavior understood
 - audit/nonce/lock safety reviewed under plugin runtime
 - explicit operator/allowlist safety model defined
+- see also: `docs/plugin-install-execute-safety-design.md`
 
 ---
 

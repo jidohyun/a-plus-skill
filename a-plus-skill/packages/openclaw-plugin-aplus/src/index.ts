@@ -9,34 +9,22 @@ import { getRecommendationReport } from '../../../dist/src/application/recommend
 import { getInstallPlanReport } from '../../../dist/src/application/recommend/getInstallPlanReport.js';
 import { resolveRuntimeConfig } from '../../../dist/src/application/config/resolveRuntimeConfig.js';
 import { execFileSync } from 'node:child_process';
-
-const formatSchema = Type.Optional(Type.Union([Type.Literal('json'), Type.Literal('summary')]));
-
-type ToolFormat = 'json' | 'summary';
-
-type PluginConfigShape = {
-  policy?: 'strict' | 'balanced' | 'fast';
-  profileType?: 'developer' | 'automation' | 'assistant';
-  hours?: number;
-  format?: 'json' | 'summary';
-};
-
-function getPluginConfig(api: { config?: unknown }): PluginConfigShape {
-  if (!api || !('config' in api)) return {};
-  const raw = api.config;
-  if (!raw || typeof raw !== 'object') return {};
-  return raw as PluginConfigShape;
-}
-
-function resolveFormat(raw?: string): ToolFormat {
-  return raw === 'summary' ? 'summary' : 'json';
-}
-
-function asToolText(payload: unknown, summary: string, format: ToolFormat) {
-  return {
-    content: [{ type: 'text', text: format === 'summary' ? summary : JSON.stringify(payload, null, 2) }]
-  };
-}
+import {
+  asToolText,
+  formatSchema,
+  getPluginConfig,
+  policySchema,
+  profileTypeSchema,
+  resolveFormat
+} from './toolHelpers.js';
+import {
+  summarizeAuditVerify,
+  summarizeInstallPlanReport,
+  summarizeInstallSummary,
+  summarizeRecommendationReport,
+  summarizeScoringCalibration,
+  summarizeStatus
+} from './summaries.js';
 
 function run(label: string, command: string, args: string[]) {
   try {
@@ -75,36 +63,6 @@ async function buildAplusStatus() {
       stderr: delivery.stderr
     }
   });
-}
-
-function summarizeStatus(status: ReturnType<typeof getMaintenanceStatus> extends Promise<infer T> ? T : never): string {
-  const summary = status.summary;
-  return `aplus_status overall=${summary.overall} severity=${summary.severity} issue_count=${summary.issue_count} primary_issue=${summary.primary_issue} recommended_action=${JSON.stringify(summary.recommended_action)}`;
-}
-
-function summarizeInstallSummary(summary: ReturnType<typeof getInstallSummary>): string {
-  const actions = summary.counters.actions.slice(0, 2).map((row) => `${row.key}:${row.count}`).join(', ') || 'none';
-  const statuses = summary.counters.statuses.slice(0, 2).map((row) => `${row.key}:${row.count}`).join(', ') || 'none';
-  return `aplus_install_summary hours=${summary.summary.hours} records=${summary.summary.records} actions=${JSON.stringify(actions)} statuses=${JSON.stringify(statuses)}`;
-}
-
-function summarizeScoringCalibration(calibration: Awaited<ReturnType<typeof getScoringCalibration>>): string {
-  const counts = calibration.decision_counts;
-  return `aplus_scoring_calibration policy=${calibration.summary.policy} source=${calibration.summary.source} degraded=${calibration.summary.degraded} sample_quality=${calibration.summary.sample_quality} decisions=${JSON.stringify(`recommend=${counts.recommend} caution=${counts.caution} hold=${counts.hold} block=${counts.block}`)}`;
-}
-
-function summarizeRecommendationReport(report: Awaited<ReturnType<typeof getRecommendationReport>>): string {
-  const top = report.results.slice(0, 3).map((item) => `${item.slug}:${item.decision}:${item.finalScore.toFixed(1)}`).join(', ') || 'none';
-  return `aplus_recommend_report policy=${report.policy} source=${report.source} degraded=${report.degraded} results=${report.results.length} top=${JSON.stringify(top)}`;
-}
-
-function summarizeAuditVerify(result: ReturnType<typeof getAuditVerify>): string {
-  return `aplus_audit_verify ok=${result.ok} line=${result.line} verifiedCount=${result.verifiedCount} path=${JSON.stringify(result.path)} reason=${JSON.stringify(result.reason)}`;
-}
-
-function summarizeInstallPlanReport(plan: Awaited<ReturnType<typeof getInstallPlanReport>>): string {
-  const top = plan.items.slice(0, 3).map((item) => `${item.slug}:${item.installAction}:${item.decision}`).join(', ') || 'none';
-  return `aplus_install_plan policy=${plan.policy} source=${plan.source} degraded=${plan.degraded} items=${plan.items.length} top=${JSON.stringify(top)}`;
 }
 
 export default definePluginEntry({
@@ -157,12 +115,12 @@ export default definePluginEntry({
       description: 'Return scoring distribution and decision calibration for a-plus-skill.',
       parameters: Type.Object({
         format: formatSchema,
-        policy: Type.Optional(Type.Union([Type.Literal('strict'), Type.Literal('balanced'), Type.Literal('fast')]))
+        policy: policySchema,
+        profileType: profileTypeSchema
       }),
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
-        const calibration = await getScoringCalibration();
-        calibration.summary.policy = resolved.policy;
+        const calibration = await getScoringCalibration({ policy: resolved.policy, profileType: resolved.profileType });
         return asToolText(calibration, summarizeScoringCalibration(calibration), resolveFormat(resolved.format));
       }
     });
@@ -172,8 +130,8 @@ export default definePluginEntry({
       description: 'Generate a read-only recommendation report without install or delivery side effects.',
       parameters: Type.Object({
         format: formatSchema,
-        policy: Type.Optional(Type.Union([Type.Literal('strict'), Type.Literal('balanced'), Type.Literal('fast')])),
-        profileType: Type.Optional(Type.Union([Type.Literal('developer'), Type.Literal('automation'), Type.Literal('assistant')]))
+        policy: policySchema,
+        profileType: profileTypeSchema
       }),
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
@@ -200,8 +158,8 @@ export default definePluginEntry({
       description: 'Generate a read-only install planning view without executing installs.',
       parameters: Type.Object({
         format: formatSchema,
-        policy: Type.Optional(Type.Union([Type.Literal('strict'), Type.Literal('balanced'), Type.Literal('fast')])),
-        profileType: Type.Optional(Type.Union([Type.Literal('developer'), Type.Literal('automation'), Type.Literal('assistant')]))
+        policy: policySchema,
+        profileType: profileTypeSchema
       }),
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });

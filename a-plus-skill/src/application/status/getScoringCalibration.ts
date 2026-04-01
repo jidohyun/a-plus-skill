@@ -4,6 +4,7 @@ import { calculateFinalScore, calculateFitScore, calculateStabilityScore, calcul
 import { securityScore } from '../../security/riskScoring.js';
 import { loadProfile } from '../../index.js';
 import { fetchCandidateSkills } from '../../collector/clawhubClient.js';
+import type { Policy, ProfileType } from '../../types/index.js';
 
 export type ScoreStats = {
   min: number;
@@ -57,9 +58,10 @@ function increment(map: Map<string, number>, key: string) {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
-export async function getScoringCalibration(): Promise<ScoringCalibrationResult> {
-  const profile = await loadProfile();
-  const policy = loadPolicyFromEnv('balanced');
+export async function getScoringCalibration(options: { policy?: Policy; profileType?: ProfileType } = {}): Promise<ScoringCalibrationResult> {
+  const loadedProfile = await loadProfile();
+  const profile = options.profileType && loadedProfile.type !== options.profileType ? { ...loadedProfile, type: options.profileType } : loadedProfile;
+  const policy = options.policy ?? loadPolicyFromEnv('balanced');
   const { skills, meta } = await fetchCandidateSkills();
 
   const fitScores: number[] = [];
