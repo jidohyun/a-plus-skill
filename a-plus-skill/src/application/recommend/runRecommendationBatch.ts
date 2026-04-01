@@ -9,7 +9,7 @@ import { buildReasons } from '../../recommender/explain.js';
 import { calculateFinalScore, calculateFitScore, calculateStabilityScore, calculateTrendScore } from '../../recommender/scoring.js';
 import { renderWeeklyReport } from '../../report/weeklyReport.js';
 import { securityScore } from '../../security/riskScoring.js';
-import type { CollectorMeta, InstallOutcome, Policy, ProfileConfig, RecommendationResult } from '../../types/index.js';
+import type { CollectorMeta, InstallOutcome, Policy, ProfileConfig, ProfileType, RecommendationResult } from '../../types/index.js';
 import {
   appendInstallOpsEvent,
   applyAuditIntegrityGate,
@@ -26,6 +26,7 @@ export type RecommendationBatchOptions = {
   install?: boolean;
   deliver?: boolean;
   profile?: ProfileConfig;
+  profileType?: ProfileType;
   policy?: Policy;
 };
 
@@ -39,7 +40,12 @@ export type RecommendationBatchResult = {
 };
 
 export async function runRecommendationBatch(options: RecommendationBatchOptions = {}): Promise<RecommendationBatchResult> {
-  const profile = options.profile ?? (await loadProfile());
+  const loadedProfile = await loadProfile();
+  const profile = options.profile
+    ? options.profile
+    : options.profileType && loadedProfile.type !== options.profileType
+      ? { ...loadedProfile, type: options.profileType }
+      : loadedProfile;
   const { skills, meta } = await fetchCandidateSkills();
   const policy = options.policy ?? loadPolicyFromEnv('balanced');
   const topology = loadInstallTopologyFromEnv('single-instance');

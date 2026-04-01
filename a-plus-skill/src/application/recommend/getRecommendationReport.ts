@@ -1,4 +1,4 @@
-import type { Policy, ProfileConfig, RecommendationResult } from '../../types/index.js';
+import type { Policy, ProfileConfig, ProfileType, RecommendationResult } from '../../types/index.js';
 import { runRecommendationBatch } from './runRecommendationBatch.js';
 
 export type RecommendationReportResult = {
@@ -12,8 +12,8 @@ export type RecommendationReportResult = {
   report: string;
 };
 
-export async function getRecommendationReport(): Promise<RecommendationReportResult> {
-  const batch = await runRecommendationBatch({ install: false, deliver: false });
+export async function getRecommendationReport(options: { policy?: Policy; profileType?: ProfileType } = {}): Promise<RecommendationReportResult> {
+  const batch = await runRecommendationBatch({ install: false, deliver: false, policy: options.policy, profileType: options.profileType });
 
   return {
     policy: batch.policy,

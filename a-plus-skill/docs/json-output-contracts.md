@@ -180,9 +180,54 @@ Returns a read-only recommendation/report payload:
 }
 ```
 
+### `aplus_audit_verify`
+Returns the audit verification payload:
+
+```json
+{
+  "ok": true,
+  "line": 0,
+  "reason": "OK verified=12 lastHash=...",
+  "path": ".../data/install-events.jsonl",
+  "verifiedCount": 12,
+  "lastHash": "..."
+}
+```
+
+### `aplus_install_plan`
+Returns a planning-only install view:
+
+```json
+{
+  "policy": "strict|balanced|fast",
+  "profileType": "developer|automation|assistant",
+  "source": "live|fallback",
+  "degraded": false,
+  "fallbackReason": "NONE|...",
+  "fetchedAt": "2026-03-30T00:00:00.000Z",
+  "items": [
+    {
+      "slug": "demo/tool",
+      "decision": "hold",
+      "installAction": "confirm-install",
+      "canInstall": false,
+      "finalScore": 52,
+      "securityScore": 48,
+      "notes": ["hold override pending: confirmation missing"],
+      "reasons": []
+    }
+  ]
+}
+```
+
 ### Notes
-- Phase 1 plugin tools are intentionally read-mostly.
+- Phase 1/2 plugin tools are intentionally read-mostly.
+- All plugin tools accept `format=json|summary` (default: `json`).
+- Read-only plugin tools now resolve runtime config with precedence: tool input > plugin config > env > defaults.
+- Current resolved keys: `policy`, `profileType`, `hours`, `format`.
+- In `summary` mode, tools return compact human-readable text instead of the full JSON payload.
 - `aplus_recommend_report` does **not** perform install or delivery side effects.
+- `aplus_audit_verify` does not modify audit state; it only verifies the current chain.
 - Plugin tool payloads should evolve additively; consumers should ignore unknown fields.
 
 ## Consumer guidance

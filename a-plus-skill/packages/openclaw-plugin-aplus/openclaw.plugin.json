@@ -9,6 +9,22 @@
       "readOnly": {
         "type": "boolean",
         "description": "Reserved flag for future plugin-side safety defaults. Phase 1 tools are read-mostly regardless of this value."
+      },
+      "policy": {
+        "type": "string",
+        "enum": ["strict", "balanced", "fast"]
+      },
+      "profileType": {
+        "type": "string",
+        "enum": ["developer", "automation", "assistant"]
+      },
+      "hours": {
+        "type": "number",
+        "minimum": 1
+      },
+      "format": {
+        "type": "string",
+        "enum": ["json", "summary"]
       }
     }
   }

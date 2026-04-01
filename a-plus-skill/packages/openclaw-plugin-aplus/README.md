@@ -9,6 +9,8 @@ Read-mostly tools only:
 - `aplus_install_summary`
 - `aplus_scoring_calibration`
 - `aplus_recommend_report`
+- `aplus_audit_verify`
+- `aplus_install_plan`
 
 ## Notes
 
@@ -35,5 +37,8 @@ openclaw plugins inspect a-plus-skill --json
 ## Current limitations
 
 - The plugin currently depends on root build output under `dist/src/`.
-- Tools currently return JSON payloads serialized as text content.
-- Phase 1 does not expose install execution, delivery sending, or override token flows.
+- Tools support `format=json|summary`, but responses are still delivered as text content blocks.
+- Read-only tools now resolve `policy`, `profileType`, `hours`, and `format` with precedence: tool input > plugin config > env > defaults.
+- `aplus_install_plan` is planning-only and does not execute installs.
+- Phase 1/2 does not expose install execution, delivery sending, or override token flows.
+- `aplus_audit_verify` is read-only and verifies the current audit chain state.

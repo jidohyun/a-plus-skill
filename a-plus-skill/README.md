@@ -153,7 +153,7 @@ npm run build
 - `install:summary --json`
 - `scoring:calibration --json`
 - `collector:status --json`
-- OpenClaw plugin tools (`aplus_status`, `aplus_install_summary`, `aplus_scoring_calibration`, `aplus_recommend_report`)
+- OpenClaw plugin tools (`aplus_status`, `aplus_install_summary`, `aplus_scoring_calibration`, `aplus_recommend_report`, `aplus_audit_verify`, `aplus_install_plan`)
 
 ## OpenClaw plugin (phase 1)
 현재 `a-plus-skill`은 별도 plugin package로도 사용할 수 있습니다.
@@ -166,11 +166,17 @@ npm run build
 - `aplus_install_summary`
 - `aplus_scoring_calibration`
 - `aplus_recommend_report`
+- `aplus_audit_verify`
+- `aplus_install_plan`
 
 특징:
 - 모두 **read-mostly** tool입니다.
 - `aplus_recommend_report`는 install / delivery side effect 없이 read-only recommendation report만 생성합니다.
-- install execute / delivery send / override 관련 tool은 아직 plugin scope에 포함되지 않습니다.
+- 각 tool은 `format=json|summary` 입력을 지원합니다. 기본값은 `json`입니다.
+- 일부 tool은 이제 tool input > plugin config > env > default 우선순위로 runtime config를 해석합니다.
+  - 현재 적용: `policy`, `profileType`, `hours`, `format`
+- `aplus_install_plan`은 planning-only tool이며 실제 install 실행은 하지 않습니다.
+- install execute / delivery send / override 관련 execution tool은 아직 plugin scope에 포함되지 않습니다.
 
 설치 절차:
 ```bash
