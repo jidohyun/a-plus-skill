@@ -13,6 +13,13 @@ export type PluginConfigShape = {
   format?: 'json' | 'summary';
 };
 
+export type ToolEnvelope<T> = {
+  tool: string;
+  format: 'json';
+  generatedAt: string;
+  data: T;
+};
+
 export function getPluginConfig(api: { config?: unknown }): PluginConfigShape {
   if (!api || !('config' in api)) return {};
   const raw = api.config;
@@ -24,9 +31,19 @@ export function resolveFormat(raw?: string): ToolFormat {
   return raw === 'summary' ? 'summary' : 'json';
 }
 
-export function asToolText(payload: unknown, summary: string, format: ToolFormat) {
+export function makeEnvelope<T>(tool: string, data: T): ToolEnvelope<T> {
   return {
-    content: [{ type: 'text', text: format === 'summary' ? summary : JSON.stringify(payload, null, 2) }]
+    tool,
+    format: 'json',
+    generatedAt: new Date().toISOString(),
+    data
+  };
+}
+
+export function asToolText<T>(tool: string, payload: T, summary: string, format: ToolFormat) {
+  const value = format === 'summary' ? summary : JSON.stringify(makeEnvelope(tool, payload), null, 2);
+  return {
+    content: [{ type: 'text', text: value }]
   };
 }
 

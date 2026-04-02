@@ -139,11 +139,15 @@ Implementation location (current plan):
 
 
 ### `aplus_status`
-Returns the same logical payload as the maintenance status JSON contract:
+In `format=json`, plugin tools now return an additive envelope:
 
 ```json
 {
-  "summary": {
+  "tool": "aplus_status",
+  "format": "json",
+  "generatedAt": "2026-04-01T01:00:00.000Z",
+  "data": {
+    "summary": {
     "overall": "healthy|degraded|nonhealthy",
     "severity": "info|medium|high|critical",
     "issue_count": 0,
@@ -153,8 +157,9 @@ Returns the same logical payload as the maintenance status JSON contract:
     "delivery_failures": 0,
     "primary_issue": "none|ops_gate_fail|fast_cap_attention|collector_fallback|delivery_failures",
     "recommended_action": "..."
-  },
-  "checks": []
+    },
+    "checks": []
+  }
 }
 ```
 
@@ -221,8 +226,9 @@ Returns a planning-only install view:
 ```
 
 ### Notes
-- Phase 1/2 plugin tools are intentionally read-mostly.
+- Phase 1/2/4 plugin tools are intentionally read-mostly except for metadata enrichment in JSON mode.
 - All plugin tools accept `format=json|summary` (default: `json`).
+- In `format=json`, plugin tools return an additive envelope with `tool`, `format`, `generatedAt`, and `data`.
 - Read-only plugin tools now resolve runtime config with precedence: tool input > plugin config > env > defaults.
 - Current resolved keys: `policy`, `profileType`, `hours`, `format`.
 - In `summary` mode, tools return compact human-readable text instead of the full JSON payload.

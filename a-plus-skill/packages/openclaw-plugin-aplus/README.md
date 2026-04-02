@@ -38,6 +38,7 @@ openclaw plugins inspect a-plus-skill --json
 
 - The plugin currently depends on root build output under `dist/src/`.
 - Tools support `format=json|summary`, but responses are still delivered as text content blocks.
+- In `format=json`, payloads are wrapped in an additive metadata envelope: `tool`, `format`, `generatedAt`, `data`.
 - Read-only tools now resolve `policy`, `profileType`, `hours`, and `format` with precedence: tool input > plugin config > env > defaults.
 - `aplus_install_plan` is planning-only and does not execute installs.
 - Phase 1/2 does not expose install execution, delivery sending, or override token flows.

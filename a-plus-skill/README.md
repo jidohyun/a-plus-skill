@@ -173,6 +173,7 @@ npm run build
 - 모두 **read-mostly** tool입니다.
 - `aplus_recommend_report`는 install / delivery side effect 없이 read-only recommendation report만 생성합니다.
 - 각 tool은 `format=json|summary` 입력을 지원합니다. 기본값은 `json`입니다.
+- `format=json`에서는 additive metadata envelope(`tool`, `format`, `generatedAt`, `data`)를 반환합니다.
 - 일부 tool은 이제 tool input > plugin config > env > default 우선순위로 runtime config를 해석합니다.
   - 현재 적용: `policy`, `profileType`, `hours`, `format`
 - `aplus_install_plan`은 planning-only tool이며 실제 install 실행은 하지 않습니다.

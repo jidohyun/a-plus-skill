@@ -92,7 +92,7 @@ export default definePluginEntry({
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
         const status = await buildAplusStatus();
-        return asToolText(status, summarizeStatus(status), resolveFormat(resolved.format));
+        return asToolText('aplus_status', status, summarizeStatus(status), resolveFormat(resolved.format));
       }
     });
 
@@ -106,7 +106,7 @@ export default definePluginEntry({
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { hours: 24, format: 'json' } });
         const summary = getInstallSummary(resolved.hours);
-        return asToolText(summary, summarizeInstallSummary(summary), resolveFormat(resolved.format));
+        return asToolText('aplus_install_summary', summary, summarizeInstallSummary(summary), resolveFormat(resolved.format));
       }
     });
 
@@ -121,7 +121,7 @@ export default definePluginEntry({
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
         const calibration = await getScoringCalibration({ policy: resolved.policy, profileType: resolved.profileType });
-        return asToolText(calibration, summarizeScoringCalibration(calibration), resolveFormat(resolved.format));
+        return asToolText('aplus_scoring_calibration', calibration, summarizeScoringCalibration(calibration), resolveFormat(resolved.format));
       }
     });
 
@@ -136,7 +136,7 @@ export default definePluginEntry({
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
         const report = await getRecommendationReport({ policy: resolved.policy, profileType: resolved.profileType });
-        return asToolText(report, summarizeRecommendationReport(report), resolveFormat(resolved.format));
+        return asToolText('aplus_recommend_report', report, summarizeRecommendationReport(report), resolveFormat(resolved.format));
       }
     });
 
@@ -149,7 +149,7 @@ export default definePluginEntry({
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
         const result = getAuditVerify();
-        return asToolText(result, summarizeAuditVerify(result), resolveFormat(resolved.format));
+        return asToolText('aplus_audit_verify', result, summarizeAuditVerify(result), resolveFormat(resolved.format));
       }
     });
 
@@ -164,7 +164,7 @@ export default definePluginEntry({
       async execute(_id, params) {
         const resolved = resolveRuntimeConfig({ toolInput: params, pluginConfig, defaults: { format: 'json' } });
         const plan = await getInstallPlanReport({ policy: resolved.policy, profileType: resolved.profileType });
-        return asToolText(plan, summarizeInstallPlanReport(plan), resolveFormat(resolved.format));
+        return asToolText('aplus_install_plan', plan, summarizeInstallPlanReport(plan), resolveFormat(resolved.format));
       }
     });
   }
